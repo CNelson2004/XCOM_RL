@@ -143,9 +143,26 @@ def test_unit_observation_shows_hit_chances_and_costs():
     b = env.battle
     u = b.units[b.active]
     f = dict(zip(UNIT_FEATURES, obs["unit"]))
-    assert obs["unit"].shape == (8,) and env.observation_space["unit"].contains(obs["unit"])
+    assert obs["unit"].shape == (10,) and env.observation_space["unit"].contains(obs["unit"])
     assert np.isclose(f["snap_hit_chance"], b.hit_chance(u, "snap"))
     assert np.isclose(f["aimed_hit_chance"], b.hit_chance(u, "aimed"))
     assert np.isclose(f["snap_tu_cost"], u.shot_cost("snap") / u.max_tu)
     assert np.isclose(f["aimed_tu_cost"], u.shot_cost("aimed") / u.max_tu)
     assert f"({f['snap_hit_chance']:.0%} chance)" in env.describe_action(8, with_chance=True)
+
+
+def test_step_costs_in_observation_match_real_steps():
+    """A straight step lowers tu_fraction by step_tu_cost, a diagonal one by diagonal_step_tu_cost."""
+    env = XcomEnv()
+    obs, info = env.reset(seed=0)
+    b = env.battle
+    b.grid[1:-1, 1:-1] = FLOOR                       # open map, so both kinds of step are legal
+    b.units[2].tu = b.units[3].tu = 0                # no reaction fire
+    obs = env._obs()
+    f = dict(zip(UNIT_FEATURES, obs["unit"]))
+    assert np.isclose(f["diagonal_step_tu_cost"], 1.5 * f["step_tu_cost"])
+    for action, key in [(4, "step_tu_cost"), (3, "diagonal_step_tu_cost")]:   # step S, then step SE
+        before = dict(zip(UNIT_FEATURES, env._obs()["unit"]))["tu_fraction"]
+        obs, _, _, _, info = env.step(action)
+        after = dict(zip(UNIT_FEATURES, obs["unit"]))["tu_fraction"]
+        assert np.isclose(before - after, f[key])

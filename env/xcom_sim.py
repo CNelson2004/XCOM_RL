@@ -284,6 +284,8 @@ UNIT_FEATURES = [
     "aimed_hit_chance",      # chance an aimed shot hits
     "snap_tu_cost",          # snap shot cost / max time units
     "aimed_tu_cost",         # aimed shot cost / max time units
+    "step_tu_cost",          # straight step (N, E, S, W) cost / max time units
+    "diagonal_step_tu_cost", # diagonal step (NE, SE, SW, NW) cost / max time units
 ]
 
 
@@ -388,7 +390,8 @@ class XcomEnv(gym.Env):
             g[4, a.y, a.x] = a.hp / a.max_hp
         vec = np.array([u.tu / u.max_tu, u.hp / u.max_hp, u.accuracy / 100, b.turn / b.max_turns,
                         b.hit_chance(u, "snap"), b.hit_chance(u, "aimed"),
-                        u.shot_cost("snap") / u.max_tu, u.shot_cost("aimed") / u.max_tu], np.float32)
+                        u.shot_cost("snap") / u.max_tu, u.shot_cost("aimed") / u.max_tu,
+                        MOVE_TU[0] / u.max_tu, MOVE_TU[1] / u.max_tu], np.float32)
         return {"grid": g, "unit": np.clip(vec, 0, 1)}
 
     def render(self):
