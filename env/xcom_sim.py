@@ -100,6 +100,12 @@ class Battle:
         self.turn, self.active, self.events = 1, 0, []
         self.last_seen = None
         self._update_last_seen()
+        self.in_view = self._visible_ids()                  # indices of aliens the squad can see right now
+
+    def name(self, u):
+        """Human-readable label: 'soldier 0', 'soldier 1', 'alien a', 'alien b', ..."""
+        i = self.units.index(u)
+        return f"soldier {i}" if u.side == SOLDIER else f"alien {chr(ord('a') + i - self.n_soldiers)}"
 
     def _connected(self, g):
         free = list(zip(*np.where(g == FLOOR)))
@@ -125,9 +131,16 @@ class Battle:
         return next((u for u in self.units if u.alive and (u.y, u.x) == (y, x)), None)
 
     def sees(self, a, b):
+        """Symmetric line of sight: if a can see b, b can also see a.
+
+        A Bresenham line from a to b can pass through different tiles than the line from b to a,
+        so sight counts as clear when either line is clear. Without this, a unit could be shot
+        by an enemy it cannot see.
+        """
         if max(abs(a.y - b.y), abs(a.x - b.x)) > SIGHT:
             return False
-        return all(self.grid[p] == FLOOR for p in line(a.y, a.x, b.y, b.x)[1:-1])
+        clear = lambda pts: all(self.grid[p] == FLOOR for p in pts[1:-1])
+        return clear(line(a.y, a.x, b.y, b.x)) or clear(line(b.y, b.x, a.y, a.x))
 
     def visible_enemies(self, side):
         """Squad-shared vision: enemies seen by at least one living unit of `side`."""
@@ -142,6 +155,13 @@ class Battle:
         # no cutting corners diagonally
         return d % 2 == 0 or (self.grid[u.y + dy, u.x] == FLOOR and self.grid[u.y, u.x + dx] == FLOOR)
 
+    def hit_chance(self, u, mode):
+        """Chance a shot hits: firing accuracy x weapon mode accuracy, capped at 95%.
+
+        Unlike the real game, this number is exact and does not depend on distance.
+        """
+        return min(0.95, u.accuracy / 100 * getattr(u.weapon, mode)[1])
+
     def can_shoot(self, u, target, mode):
         return target.alive and u.tu >= u.shot_cost(mode) and self.sees(u, target)
 
@@ -150,18 +170,23 @@ class Battle:
         assert self.can_step(u, d)
         u.y, u.x, u.tu = u.y + DIRS[d][0], u.x + DIRS[d][1], u.tu - MOVE_TU[d % 2]
         self._update_last_seen()
+        self._check_view()
         self._reaction_fire(u)
 
     def shoot(self, u, target, mode, reaction=False):
         assert self.can_shoot(u, target, mode)
         u.tu -= u.shot_cost(mode)
-        p_hit = min(0.95, u.accuracy / 100 * getattr(u.weapon, mode)[1])
+        p_hit = self.hit_chance(u, mode)
         dmg = 0
         if self.rng.random() < p_hit:
             dmg = max(0, int(self.rng.integers(0, 2 * u.weapon.power + 1)) - target.armor)   # 0-200% of power
             target.hp = max(0, target.hp - dmg)
         self.events.append(dict(type="shot", shooter=u.side, mode=mode, reaction=reaction,
-                                hit=dmg > 0, damage=dmg, killed=not target.alive))
+                                hit=dmg > 0, damage=dmg, killed=not target.alive,
+                                shooter_name=self.name(u), target_name=self.name(target),
+                                target_hp=target.hp, hit_chance=round(p_hit, 2)))
+        if not target.alive:
+            self.in_view.discard(self.units.index(target))
         if not reaction and u.alive:
             self._reaction_fire(u)
 
@@ -170,6 +195,20 @@ class Battle:
         for e in self.side(1 - mover.side):
             if mover.alive and self.can_shoot(e, mover, "snap") and e.initiative() > mover.initiative():
                 self.shoot(e, mover, "snap", reaction=True)
+
+    def _check_view(self):
+        """Record aliens coming into or leaving the squad's view (the squad knows this)."""
+        now = self._visible_ids()
+        for i in sorted(now - self.in_view):
+            a = self.units[i]
+            self.events.append(dict(type="spotted", unit=self.name(a), at=(int(a.y), int(a.x))))
+        for i in sorted(self.in_view - now):
+            if self.units[i].alive:
+                self.events.append(dict(type="lost_sight", unit=self.name(self.units[i])))
+        self.in_view = now
+
+    def _visible_ids(self):
+        return {self.units.index(a) for a in self.visible_enemies(SOLDIER)}
 
     def _update_last_seen(self):
         seen = self.visible_enemies(ALIEN)
@@ -183,8 +222,10 @@ class Battle:
         while self.active < self.n_soldiers and not self.units[self.active].alive:
             self.active += 1
         if self.active >= self.n_soldiers:
+            self.events.append(dict(type="alien_turn", turn=self.turn))
             self._alien_turn()
             self.turn += 1
+            self.events.append(dict(type="new_turn", turn=self.turn))
             for u in self.units:
                 u.tu = u.max_tu
             self.active = next((i for i in range(self.n_soldiers) if self.units[i].alive), 0)
@@ -216,18 +257,42 @@ class Battle:
         return "timeout" if self.turn > self.max_turns else None
 
     def render(self):
+        """Map plus a status line per unit the squad knows about. Aliens are drawn as a, b, c..."""
         rows = [["#" if c == WALL else "." for c in row] for row in self.grid]
-        shown = self.side(SOLDIER) + self.visible_enemies(SOLDIER)
-        for u in shown:
-            rows[u.y][u.x] = "a" if u.side == ALIEN else str(self.units.index(u))
-        return "\n".join("".join(r) for r in rows) + f"\nturn {self.turn}  active soldier {self.active}"
+        seen = self.visible_enemies(SOLDIER)
+        for u in self.side(SOLDIER) + seen:
+            rows[u.y][u.x] = self.name(u).split()[1]
+        lines = ["".join(r) for r in rows] + [f"turn {self.turn}"]
+        for u in self.units[:self.n_soldiers]:
+            if u.alive:
+                mark = "  <- active" if self.units.index(u) == self.active else ""
+                lines.append(f"  {self.name(u)}: HP {u.hp}/{u.max_hp}  TU {u.tu}/{u.max_tu}{mark}")
+            else:
+                lines.append(f"  {self.name(u)}: dead")
+        for a in seen:
+            lines.append(f"  {self.name(a)}: HP {a.hp}/{a.max_hp}  (visible)")
+        return "\n".join(lines)
+
+
+# The active soldier's "unit" observation vector, in order. Every value is scaled to 0-1.
+UNIT_FEATURES = [
+    "tu_fraction",           # time units left / max time units
+    "hp_fraction",           # health left / max health
+    "accuracy",              # firing accuracy / 100
+    "turn_fraction",         # turn number / turn limit
+    "snap_hit_chance",       # chance a snap shot hits (what the game shows)
+    "aimed_hit_chance",      # chance an aimed shot hits
+    "snap_tu_cost",          # snap shot cost / max time units
+    "aimed_tu_cost",         # aimed shot cost / max time units
+]
 
 
 class XcomEnv(gym.Env):
     """Gymnasium wrapper. One step = one action by the currently active soldier.
 
-    Actions: 0-7 step in direction d | 8..8+A-1 snap shot at alien i |
-             8+A..8+2A-1 aimed shot at alien i | last = end this soldier's turn.
+    Actions: 0-7 step in direction d (N, NE, E, SE, S, SW, W, NW) |
+             then two per alien: 8 + 2i = snap shot at alien i, 8 + 2i + 1 = aimed shot at alien i |
+             last = end this soldier's turn.  Use describe_action(a) for a readable name.
     """
     metadata = {"render_modes": ["ansi"]}
 
@@ -238,14 +303,16 @@ class XcomEnv(gym.Env):
         self.action_space = spaces.Discrete(8 + 2 * n_aliens + 1)
         self.observation_space = spaces.Dict({
             "grid": spaces.Box(0, 1, (5, size, size), np.float32),     # walls, active, friends, aliens, hp
-            "unit": spaces.Box(0, 1, (4,), np.float32),                # TU, HP, accuracy, turn (all scaled)
+            "unit": spaces.Box(0, 1, (len(UNIT_FEATURES),), np.float32),  # see UNIT_FEATURES
         })
         self.battle = None
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         self.battle = Battle(**self.cfg, seed=int(self.np_random.integers(2**31)))
-        return self._obs(), {"action_mask": self.action_masks()}
+        u = self.battle.units[self.battle.active]
+        return self._obs(), {"action_mask": self.action_masks(), "active_soldier": self.battle.active,
+                             "tu_left": u.tu, "tu_max": u.max_tu}
 
     def _aliens(self):
         return self.battle.units[self.cfg["n_soldiers"]:]
@@ -257,10 +324,33 @@ class XcomEnv(gym.Env):
         mask[:8] = [b.can_step(u, d) for d in range(8)]
         for i, a in enumerate(self._aliens()):
             ok = a in seen                                             # may only target aliens the squad sees
-            mask[8 + i] = ok and b.can_shoot(u, a, "snap")
-            mask[8 + self.A + i] = ok and b.can_shoot(u, a, "aimed")
+            mask[8 + 2 * i] = ok and b.can_shoot(u, a, "snap")
+            mask[8 + 2 * i + 1] = ok and b.can_shoot(u, a, "aimed")
         mask[-1] = True                                                # ending the turn is always legal
         return mask
+
+    def decode_shot(self, action):
+        """For a shot action, return (alien index, 'snap' or 'aimed'). Shots are grouped by alien."""
+        i, kind = divmod(action - 8, 2)
+        return i, ("snap", "aimed")[kind]
+
+    def describe_action(self, action, with_chance=False):
+        """Plain-English name of an action index, e.g. 'snap shot at alien b'.
+
+        with_chance=True adds the active soldier's chance to hit, e.g. 'snap shot at alien b (25% chance)'.
+        Use it only before the action is taken: afterwards the active soldier may have changed.
+        """
+        names = ["step N", "step NE", "step E", "step SE", "step S", "step SW", "step W", "step NW"]
+        if action < 8:
+            return names[action]
+        if action < 8 + 2 * self.A:
+            i, mode = self.decode_shot(action)
+            text = f"{mode} shot at alien {chr(ord('a') + i)}"
+            if with_chance:
+                u = self.battle.units[self.battle.active]
+                text += f" ({self.battle.hit_chance(u, mode):.0%} chance)"
+            return text
+        return "end turn"
 
     def step(self, action):
         b = self.battle
@@ -271,7 +361,7 @@ class XcomEnv(gym.Env):
         if action < 8:
             b.step_unit(u, action)
         elif action < 8 + 2 * self.A:
-            i, mode = (action - 8) % self.A, ("snap" if action < 8 + self.A else "aimed")
+            i, mode = self.decode_shot(action)
             b.shoot(u, self._aliens()[i], mode)
         if action == self.action_space.n - 1 or not u.alive:
             b.end_unit_turn()
@@ -279,8 +369,10 @@ class XcomEnv(gym.Env):
         if res is None and not b.units[b.active].alive:               # active soldier died on the alien turn
             b.end_unit_turn(); res = b.result()
         terminated, truncated = res in ("win", "loss"), res == "timeout"
+        nxt = b.units[b.active]
         info = {"events": b.events, "result": res, "illegal": illegal, "action_mask": self.action_masks(),
-                "soldiers_alive": len(b.side(SOLDIER)), "turn": b.turn}
+                "soldiers_alive": len(b.side(SOLDIER)), "turn": b.turn,
+                "active_soldier": b.active, "tu_left": nxt.tu, "tu_max": nxt.max_tu}
         return self._obs(), self.reward_fn(b.events, res), terminated, truncated, info
 
     def _obs(self):
@@ -294,11 +386,36 @@ class XcomEnv(gym.Env):
         for a in b.visible_enemies(SOLDIER):
             g[3, a.y, a.x] = 1
             g[4, a.y, a.x] = a.hp / a.max_hp
-        vec = np.array([u.tu / u.max_tu, u.hp / u.max_hp, u.accuracy / 100, b.turn / b.max_turns], np.float32)
+        vec = np.array([u.tu / u.max_tu, u.hp / u.max_hp, u.accuracy / 100, b.turn / b.max_turns,
+                        b.hit_chance(u, "snap"), b.hit_chance(u, "aimed"),
+                        u.shot_cost("snap") / u.max_tu, u.shot_cost("aimed") / u.max_tu], np.float32)
         return {"grid": g, "unit": np.clip(vec, 0, 1)}
 
     def render(self):
         return self.battle.render()
+
+
+def format_event(e):
+    """One readable line per event, for play.py and debugging."""
+    if e["type"] == "shot":
+        kind = "reaction " if e["reaction"] else ""
+        if not e["hit"]:
+            outcome = "missed"
+        elif e["killed"]:
+            outcome = f"hit for {e['damage']}, KILLED"
+        else:
+            outcome = f"hit for {e['damage']}, {e['target_hp']} HP left"
+        return (f"{e['shooter_name']} {kind}{e['mode']} shot at {e['target_name']} "
+                f"({e['hit_chance']:.0%} chance): {outcome}")
+    if e["type"] == "spotted":
+        return f"spotted {e['unit']} at {e['at']}"
+    if e["type"] == "lost_sight":
+        return f"lost sight of {e['unit']}"
+    if e["type"] == "alien_turn":
+        return f"--- alien turn {e['turn']} ---"
+    if e["type"] == "new_turn":
+        return f"--- turn {e['turn']} begins ---"
+    return str(e)
 
 
 def sparse_reward(events, result):
