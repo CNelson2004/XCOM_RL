@@ -1,9 +1,9 @@
 import torch.nn as nn
 
 class PolicyNetwork(nn.Module):
-  def __init__(self, state_size, action_size):
+  def __init__(self, state_size, action_size, hidden_size):
     super().__init__()
-    hidden_size = 8
+    # Changed to deal with larger state size
 
     self.net = nn.Sequential(nn.Linear(state_size, hidden_size),
                              nn.ReLU(),
@@ -27,9 +27,8 @@ class PolicyNetwork(nn.Module):
 
 
 class ValueNetwork(nn.Module):
-  def __init__(self, state_size):
+  def __init__(self, state_size, hidden_size):
     super().__init__()
-    hidden_size = 8
 
     self.net = nn.Sequential(nn.Linear(state_size, hidden_size),
                              nn.ReLU(),

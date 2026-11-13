@@ -33,3 +33,7 @@ def play(seed=1, actions=None):
 
 if __name__ == "__main__":
     play()
+
+
+
+# For first run - small and simple map: size=7, n_soldiers=1, n_aliens=1, max_turns=5, reward_fn=None
