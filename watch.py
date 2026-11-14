@@ -7,7 +7,7 @@ from gymnasium.wrappers import RecordVideo
 from IPython.display import HTML
 from IPython import display as ipythondisplay
 
-from agents.ppo import get_action_ppo
+from agents.ppo import get_action_ppo_cartpole
 
 
 def show_video():
@@ -36,7 +36,7 @@ def record_episode(policy_network):
   state, _ = env.reset()
   done, total = False, 0
   while not done:
-    actions, _ = get_action_ppo(policy_network, state[None, :])   # batch of one: shape (1, 4)
+    actions, _ = get_action_ppo_cartpole(policy_network, state[None, :])   # batch of one: shape (1, 4)
     state, reward, terminated, truncated, _ = env.step(int(actions[0]))
     total += reward
     done = terminated or truncated

@@ -10,8 +10,9 @@ from watch import record_episode
 def run(is_XCOM = True):
 
     if is_XCOM:
-        results_ppo, policy_network = ppo_main_xcom()
+        results_ppo, policy_network, history = ppo_main_xcom()
         os.makedirs("runs", exist_ok=True)
+        print(history)
         # saving network
         torch.save(policy_network.state_dict(), "runs/policy_xcom.pt")   # saves the learned weights
         print("Saved network to runs/policy_xcom.pt")
