@@ -9,6 +9,7 @@ import numpy as np
 from agents.buffer import calculate_return_cartpole, calculate_return_xcom, RLDataset
 from agents.networks import PolicyNetwork_Cartpole, PolicyNetwork_Xcom, ValueNetwork_Cartpole, ValueNetwork_Xcom
 from agents.ppo import get_action_ppo_cartpole, learn_ppo_cartpole, get_action_ppo_xcom, learn_ppo_xcom
+from agents.checkpoints import save_checkpoint, load_checkpoint
 
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode
 from gymnasium.wrappers import FlattenObservation
@@ -16,7 +17,7 @@ from gymnasium.wrappers import FlattenObservation
 from env.xcom_sim import XcomEnv
 
 
-def ppo_main_xcom(epochs=3):
+def ppo_main_xcom(epochs=3,save_rate=100):
   # Hyper parameters
   lr = 3e-4
   env_samples = 100
@@ -37,6 +38,12 @@ def ppo_main_xcom(epochs=3):
       [lambda: FlattenObservation(XcomEnv()) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
+
+  # setting config to be used for checkpoint
+  config = {"obs_size": obs_size, "action_size": action_size, "hidden_size": hidden_size,
+          "lr": lr, "gamma": gamma, "epsilon": epsilon, "num_envs": num_envs}
+
+  # getting initial observations
   obs, _ = envs.reset(seed=0)       
 
   # Init networks
@@ -128,6 +135,14 @@ def ppo_main_xcom(epochs=3):
     loop.update(1)
     loop.set_description("Epochs: {} Win Rate: {}".format(epoch, win_rate))
 
+    # making checkpoint 
+    if (epoch+1) % save_rate == 0:
+      path = f"runs/checkpoint_xcom_epoch{epoch + 1}.pt"
+      save_checkpoint(path, policy_network, value_network, optim, epoch + 1, history, config)
+      tqdm.write(f"Saved {path}")
+
+  # making one last save
+  save_checkpoint("runs/checkpoint_xcom_final.pt", policy_network, value_network, optim, epochs, history, config)
   # closing environments since training is done
   envs.close()
 

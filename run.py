@@ -1,8 +1,8 @@
 # run.py: train, save the network, then record one episode
 import os
-import torch
 from train import ppo_main_cartpole, ppo_main_xcom
 from watch import record_episode
+from plots import plot_history
 
 # this is to check that moved code works with cartpole
 # also to practice making a checkpoint for a network
@@ -11,11 +11,9 @@ def run(is_XCOM = True):
 
     if is_XCOM:
         results_ppo, policy_network, history = ppo_main_xcom()
-        os.makedirs("runs", exist_ok=True)
-        print(history)
-        # saving network
-        torch.save(policy_network.state_dict(), "runs/policy_xcom.pt")   # saves the learned weights
-        print("Saved network to runs/policy_xcom.pt")
+        # plotting what we got (all saving already done in ppo_main)
+        plot_history(history, "runs/training_curves.png",
+        baselines={"random": 0.126, "scripted (advance)": 0.166, "scripted (hold)": 0.29})
 
     else:
         results_ppo, policy_network = ppo_main_cartpole()
@@ -33,12 +31,14 @@ if __name__ == "__main__":
     run()
 
 '''
-# To load in network later
+# To load in network later (would need to be used inside ppo_main)
 
-from agents.networks import PolicyNetwork
+checkpoint = load_checkpoint("runs/checkpoint_xcom_final.pt")
+config = checkpoint["config"]
+policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
+policy_network.load_state_dict(checkpoint["policy"])
+policy_network.eval() 
 
-policy_network = PolicyNetwork(state_size=4, action_size=2)
-policy_network.load_state_dict(torch.load("runs/policy_cartpole.pt"))
-policy_network.eval()   # switches the network into "using it, not training it" mode
-
+# how to plot from a saved checkpoint
+plot_history("runs/checkpoint_xcom_epoch200.pt", "runs/epoch200_curves.png")
 '''
