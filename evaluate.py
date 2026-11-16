@@ -1,6 +1,9 @@
 import numpy as np
 from gymnasium.wrappers import FlattenObservation
 from env.xcom_sim import XcomEnv
+from agents.checkpoints import load_checkpoint
+from agents.networks import PolicyNetwork_Xcom
+from agents.ppo import get_action_ppo_xcom
 
 # evaluate the policy given to it
 def evaluate(policy, n_battles=500,init_seed=1_000_000,flatten=True,**env_kwargs):
@@ -130,19 +133,35 @@ def scripted_agent(fixed_position=True):
 
     return aggressive_policy, cautious_policy
 
+def learning_agent(path):
+    checkpoint = load_checkpoint(path)
+    config = checkpoint["config"]
+    policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
+    policy_network.load_state_dict(checkpoint["policy"])
+    policy_network.eval() 
+
+    def learning_policy(obs,mask):
+        actions, _ = get_action_ppo_xcom(policy_network,obs[None,:],mask[None,:])
+        return int(actions[0])
+
+    # These should go in as **envkwargs because they don't fit anythign else in the arguments
+    return learning_policy
+
 
 if __name__ == "__main__":
     # creating baselines to compare against
     # using random agent for evaluation
-    print("Random:")
-    print(evaluate(random_agent()))
+    #print("Random:")
+    #print(evaluate(random_agent()))
     # aggressive agent that chases aliens down
-    print("Aggressive:")
-    print(evaluate(scripted_agent()[0],flatten=False))
+    #print("Aggressive:")
+    #print(evaluate(scripted_agent()[0],flatten=False))
     # caustious agent that waits for aliens to come to them
-    print("Cautious:")
-    print(evaluate(scripted_agent()[1],flatten=False))
+    #print("Cautious:")
+    #print(evaluate(scripted_agent()[1],flatten=False))
 
     # my agent
     print("Learner:")
+    print("one soldier; one alien; 5 x 5 map")
+    print(evaluate(learning_agent("runs/checkpoint_xcom_one.pt"), size=5, n_soldiers=1, n_aliens=1, alien_hp=1, wall_segments=0))
 

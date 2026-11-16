@@ -17,25 +17,23 @@ from gymnasium.wrappers import FlattenObservation
 from env.xcom_sim import XcomEnv
 
 
-def ppo_main_xcom(epochs=3,save_rate=100):
+def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
   lr = 3e-4
-  env_samples = 100
   gamma = 0.99
   batch_size = 256
   epsilon = 0.2
   policy_epochs = 5
   hidden_size = 128
 
-  obs_size = 730 #size of total state model can see (730 comes from flattened obs: grid: (12 x 12)*5 + unit: 10)
-  action_size = 13 #number of actions that can be taken (movements, shooting, and passing turn)
+  obs_size = 5 * size * size + 10 #size of total state model can see (flattened obs: grid: (12 x 12)*5 + unit: 10)
+  action_size = 8 + 2 * n_aliens + 1 #number of actions that can be taken (8 types of movement, 2 shots for each alien, and passing turn)
 
   # Init environment
   # making the parallel XCOM environments
-  #envs = AsyncVectorEnv([lambda: FlattenObservation(XcomEnv()) for _ in range(num_envs)], autoreset_mode=AutoresetMode.SAME_STEP)
   num_envs = 6
   envs = AsyncVectorEnv(
-      [lambda: FlattenObservation(XcomEnv()) for _ in range(num_envs)],
+      [lambda: FlattenObservation(XcomEnv(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
 
@@ -47,8 +45,8 @@ def ppo_main_xcom(epochs=3,save_rate=100):
   obs, _ = envs.reset(seed=0)       
 
   # Init networks
-  policy_network = PolicyNetwork_Xcom(obs_size, action_size,hidden_size).cpu() #running on my laptop, so no cuda
-  value_network = ValueNetwork_Xcom(obs_size,hidden_size).cpu()
+  policy_network = PolicyNetwork_Xcom(obs_size, action_size, hidden_size).cpu() #running on my laptop, so no cuda
+  value_network = ValueNetwork_Xcom(obs_size, hidden_size).cpu()
 
   # Init optimizer
   optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=lr)
@@ -73,7 +71,12 @@ def ppo_main_xcom(epochs=3,save_rate=100):
     episodes = 0
     
     # starting loop
-    while episodes < env_samples:
+    # when doing small battles on small maps you don't get enough data just through 100 battles, since so few steps are taken
+    # thus we need to make sure enough steps are taken and enough battles are done to get enough data to learn from
+    # each memory item is a step, thus we can count those
+    battles = 100
+    num_steps = 2000
+    while episodes < battles or len(memory) < num_steps:
       # Getting actions for each environment
       actions, action_dists = get_action_ppo_xcom(policy_network, obs, masks)
 

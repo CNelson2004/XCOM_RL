@@ -69,8 +69,22 @@ def line(y0, x0, y1, x1):
 class Battle:
     """Rules of the game. Knows nothing about Gymnasium or neural networks."""
 
-    def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, seed=None):
+    def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, seed=None,
+                 alien_hp=30, wall_segments=None):
+        """size: map width and height in tiles, including the outer wall (minimum 5).
+        alien_hp: every alien's health (30 is a Sectoid soldier; 1 means any hit kills).
+        wall_segments: number of interior wall pieces; None picks a number that scales with the
+            map area (6 on the default 12 x 12 map, none on maps of 6 x 6 or smaller); 0 = open map.
+        """
+        if size < 5:
+            raise ValueError("size must be at least 5 (a 3 x 3 interior)")
+        if n_soldiers + n_aliens > (size - 2) ** 2:
+            raise ValueError("not enough floor tiles for that many units")
+        if alien_hp < 1:
+            raise ValueError("alien_hp must be at least 1")
         self.size, self.n_soldiers, self.n_aliens, self.max_turns = size, n_soldiers, n_aliens, max_turns
+        self.alien_hp = alien_hp
+        self.wall_segments = int(0.06 * (size - 2) ** 2) if wall_segments is None else wall_segments
         self.rng = np.random.default_rng(seed)
         self.reset()
 
@@ -79,7 +93,7 @@ class Battle:
         while True:              # regenerate until every floor tile is reachable
             g = np.zeros((self.size, self.size), dtype=np.int8)
             g[0, :] = g[-1, :] = g[:, 0] = g[:, -1] = WALL
-            for _ in range(self.size // 2):
+            for _ in range(self.wall_segments):
                 y, x = self.rng.integers(2, self.size - 2, size=2)
                 n = int(self.rng.integers(2, 5))
                 if self.rng.random() < 0.5:
@@ -96,7 +110,8 @@ class Battle:
             self._spawn(Unit(SOLDIER, 0, 0, int(r.integers(50, 61)), int(r.integers(25, 41)),
                              int(r.integers(30, 61)), int(r.integers(40, 71)), 0, RIFLE), near=(1, 1))
         for i in range(self.n_aliens):     # Sectoid soldiers start in the bottom-right corner
-            self._spawn(Unit(ALIEN, 0, 0, 54, 30, 63, 52, 4, PLASMA_PISTOL), near=(self.size - 2, self.size - 2))
+            self._spawn(Unit(ALIEN, 0, 0, 54, self.alien_hp, 63, 52, 4, PLASMA_PISTOL),
+                        near=(self.size - 2, self.size - 2))
         self.turn, self.active, self.events = 1, 0, []
         self.last_seen = None
         self._update_last_seen()
@@ -298,8 +313,14 @@ class XcomEnv(gym.Env):
     """
     metadata = {"render_modes": ["ansi"]}
 
-    def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, reward_fn=None, render_mode=None):
-        self.cfg = dict(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns)
+    def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, reward_fn=None, render_mode=None,
+                 alien_hp=30, wall_segments=None):
+        """See Battle for size, alien_hp and wall_segments.
+        Sizes the agent sees: observation 5 * size * size + len(UNIT_FEATURES) numbers when flattened
+        (730 on the default 12 x 12 map); 8 + 2 * n_aliens + 1 actions.
+        """
+        self.cfg = dict(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns,
+                        alien_hp=alien_hp, wall_segments=wall_segments)
         self.A, self.render_mode = n_aliens, render_mode
         self.reward_fn = reward_fn or sparse_reward
         self.action_space = spaces.Discrete(8 + 2 * n_aliens + 1)
@@ -313,8 +334,11 @@ class XcomEnv(gym.Env):
         super().reset(seed=seed)
         self.battle = Battle(**self.cfg, seed=int(self.np_random.integers(2**31)))
         u = self.battle.units[self.battle.active]
+        # "illegal" and "result" are included even though no action has been taken yet, so that every
+        # info dict has the same keys. A vector environment then always has these keys in its merged
+        # info, even on a step where every copy finished and restarted at once.
         return self._obs(), {"action_mask": self.action_masks(), "active_soldier": self.battle.active,
-                             "tu_left": u.tu, "tu_max": u.max_tu}
+                             "tu_left": u.tu, "tu_max": u.max_tu, "illegal": False, "result": None}
 
     def _aliens(self):
         return self.battle.units[self.cfg["n_soldiers"]:]

@@ -7,13 +7,14 @@ from plots import plot_history
 # this is to check that moved code works with cartpole
 # also to practice making a checkpoint for a network
 
-def run(is_XCOM = True):
+def run(is_XCOM = True, epochs=500, size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
 
     if is_XCOM:
-        results_ppo, policy_network, history = ppo_main_xcom()
+        results_ppo, policy_network, history = ppo_main_xcom(epochs,size=size,n_soldiers=n_soldiers,n_aliens=n_aliens,alien_hp=alien_hp,wall_segments=wall_segments)
         # plotting what we got (all saving already done in ppo_main)
         plot_history(history, "runs/training_curves.png",
         baselines={"random": 0.126, "scripted (advance)": 0.166, "scripted (hold)": 0.29})
+        # add env.render()?
 
     else:
         results_ppo, policy_network = ppo_main_cartpole()
@@ -28,7 +29,7 @@ def run(is_XCOM = True):
 
 if __name__ == "__main__":
     #run(is_XCOM = False) # for running cartpole
-    run()
+    run(size=5,n_soldiers=1,n_aliens=1,alien_hp=1,wall_segments=0)
 
 '''
 # To load in network later (would need to be used inside ppo_main)

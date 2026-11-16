@@ -166,3 +166,72 @@ def test_step_costs_in_observation_match_real_steps():
         obs, _, _, _, info = env.step(action)
         after = dict(zip(UNIT_FEATURES, obs["unit"]))["tu_fraction"]
         assert np.isclose(before - after, f[key])
+
+
+def test_alien_hp_setting():
+    env = XcomEnv(n_soldiers=1, n_aliens=1, alien_hp=1)
+    env.reset(seed=0)
+    alien = env.battle.units[1]
+    assert alien.side == ALIEN and alien.hp == alien.max_hp == 1
+    default = XcomEnv()
+    default.reset(seed=0)
+    assert default.battle.units[2].max_hp == 30       # default unchanged
+
+
+def test_any_hit_kills_a_1_hp_alien():
+    b = Battle(size=6, n_soldiers=1, n_aliens=1, seed=0, alien_hp=1)
+    s, a = b.units
+    a.tu = 0                                          # no reaction fire
+    for _ in range(50):                               # keep shooting until a hit lands
+        s.tu = s.max_tu
+        b.shoot(s, a, "aimed")
+        if b.events[-1]["hit"] or not a.alive:
+            break
+    assert not a.alive
+
+
+def test_small_open_maps_start_in_view():
+    """On 5 x 5 and 6 x 6 maps there are no interior walls, so the alien is always visible at the start."""
+    for size in (5, 6):
+        env = XcomEnv(size=size, n_soldiers=1, n_aliens=1)
+        for k in range(50):
+            obs, _ = env.reset(seed=k)
+            assert obs["grid"].shape == (5, size, size)
+            assert obs["grid"][3].any()
+            assert not obs["grid"][0][1:-1, 1:-1].any()   # no interior walls
+
+
+def test_wall_segments_setting_and_size_limits():
+    b = Battle(size=12, seed=0, wall_segments=0)
+    assert not b.grid[1:-1, 1:-1].any()
+    assert Battle(size=12, seed=0).wall_segments == 6     # default 12 x 12 map keeps its 6 wall pieces
+    for bad in (dict(size=4), dict(size=5, n_soldiers=5, n_aliens=5), dict(alien_hp=0)):
+        try:
+            Battle(**bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"expected ValueError for {bad}")
+
+
+def test_vector_info_always_has_illegal_and_result():
+    """Even when every copy finishes on the same step, the merged info keeps both keys.
+    The finished battles' real values stay in final_info."""
+    from gymnasium.wrappers import FlattenObservation
+    from gymnasium.vector import SyncVectorEnv, AutoresetMode
+    envs = SyncVectorEnv([lambda: FlattenObservation(XcomEnv(size=5, n_soldiers=1, n_aliens=1, alien_hp=1))
+                          for _ in range(6)], autoreset_mode=AutoresetMode.SAME_STEP)
+    _, info = envs.reset(seed=0)
+    assert "illegal" in info and "result" in info
+    rng, all_done_steps = np.random.default_rng(0), 0
+    for _ in range(3000):
+        acts = np.array([rng.choice(np.flatnonzero(m)) for m in info["action_mask"]])
+        _, _, te, tr, info = envs.step(acts)
+        done = te | tr
+        assert "illegal" in info and "result" in info
+        if done.all():
+            all_done_steps += 1
+        for i in np.flatnonzero(done):
+            assert not info["illegal"][i] and info["result"][i] is None      # new battle's placeholders
+            assert info["final_info"]["result"][i] in ("win", "loss", "timeout")
+    assert all_done_steps > 0          # the situation that used to drop the keys did occur
+    

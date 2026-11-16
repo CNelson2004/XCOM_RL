@@ -75,6 +75,7 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       # continuing with updating
       optim.step()
     epoch += 1
+  # TODO: Add guard in case list is empty (no batch was processed. (This could be due to too few steps in a battle or something else))
   return np.mean(entropies), np.mean(norms), np.max(norms)
     
 
