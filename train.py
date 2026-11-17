@@ -26,6 +26,14 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
   policy_epochs = 5
   hidden_size = 128
 
+  norm_epsilon = 1e-8
+  max_grad_norm = 0.5
+  entropy_coef = 0.01
+
+  battles = 100
+  num_steps = 2000
+  max_turns=30
+
   obs_size = 5 * size * size + 10 #size of total state model can see (flattened obs: grid: (12 x 12)*5 + unit: 10)
   action_size = 8 + 2 * n_aliens + 1 #number of actions that can be taken (8 types of movement, 2 shots for each alien, and passing turn)
 
@@ -33,13 +41,17 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
   # making the parallel XCOM environments
   num_envs = 6
   envs = AsyncVectorEnv(
-      [lambda: FlattenObservation(XcomEnv(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
+      [lambda: FlattenObservation(XcomEnv(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
 
   # setting config to be used for checkpoint
-  config = {"obs_size": obs_size, "action_size": action_size, "hidden_size": hidden_size,
-          "lr": lr, "gamma": gamma, "epsilon": epsilon, "num_envs": num_envs}
+  env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
+              "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
+  config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, # hyperparameters
+            "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, # more hyperparameters
+            "obs_size": obs_size, "action_size": action_size, # calculated vars
+            "num_envs": num_envs, "env_kwargs" : env_kwargs} # environment vars
 
   # getting initial observations
   obs, _ = envs.reset(seed=0)       
@@ -74,8 +86,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
     # when doing small battles on small maps you don't get enough data just through 100 battles, since so few steps are taken
     # thus we need to make sure enough steps are taken and enough battles are done to get enough data to learn from
     # each memory item is a step, thus we can count those
-    battles = 100
-    num_steps = 2000
+
     while episodes < battles or len(memory) < num_steps:
       # Getting actions for each environment
       actions, action_dists = get_action_ppo_xcom(policy_network, obs, masks)
@@ -118,7 +129,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
     # Train
     dataset = RLDataset(memory) 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,drop_last=True) # dropping lat to not have weird edge case where std later is nan while normalizing.
-    entropy, norm, max_norm = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs)
+    entropy, norm, max_norm = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
 
     #computing rates for this epoch
     win_rate = the_results["win"]/episodes

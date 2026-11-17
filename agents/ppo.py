@@ -5,7 +5,7 @@ from itertools import chain
 
 device = torch.device("cpu")
 
-def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epochs):
+def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epochs, norm_epsilon, max_grad_norm, entropy_coef):
   """Implement PPO policy and value network updates. Iterate over your entire
      memory the number of times indicated by policy_epochs.
 
@@ -29,9 +29,6 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
 
   # clip function is torch.clamp(x, min, max)
 
-  eps = 1e-8
-  max_grad_norm = 0.5
-  entropy_coef = 0.01
   entropies = []
   norms = []
 
@@ -51,7 +48,7 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       # making sure advantage gets detached
       A_hat = R_hat - V.detach()
       # normalizing advantage
-      A_hat = (A_hat - torch.mean(A_hat))/(torch.std(A_hat) + eps) # eps is here to prevent the bottom from being zero
+      A_hat = (A_hat - torch.mean(A_hat))/(torch.std(A_hat) + norm_epsilon) # eps is here to prevent the bottom from being zero
       #Calculating PolicyLoss
       dist, log_dist = apply_mask_softmax(policy(state),mask)
       curr = dist.gather(1,action.unsqueeze(1)).squeeze(1) #Using gather to get one value from the row

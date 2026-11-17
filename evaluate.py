@@ -134,8 +134,7 @@ def scripted_agent(fixed_position=True):
 
     return aggressive_policy, cautious_policy
 
-def learning_agent(path):
-    checkpoint = load_checkpoint(path)
+def learning_agent(checkpoint):
     config = checkpoint["config"]
     policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
     policy_network.load_state_dict(checkpoint["policy"])
@@ -149,23 +148,30 @@ def learning_agent(path):
     return learning_policy
 
 
-def evaluate_learner(check_path, pic_path, n_battles=500, **env_kwargs):
+def evaluate_learner(check_path, pic_path, n_battles=500):
+    # getting environment variables
+    checkpoint = load_checkpoint(check_path)
+    env_kwargs = checkpoint["config"]["env_kwargs"]
+
+    # setting up all agents and their related vars
     aggressive, cautious = scripted_agent()
     agents = {                     
       "random": (random_agent(), True), # Note: True or False refers to need to flatten
       "scripted (aggressive)": (aggressive, False),   
       "scripted (cautious)": (cautious, False),
-      "learner": (learning_agent(check_path), True),  
+      "learner": (learning_agent(checkpoint), True),  
     }
+    # evaluating agents
     results = {name: evaluate(policy, n_battles=n_battles, flatten=flatten, **env_kwargs) for name, (policy, flatten) in agents.items()}
-
+    # printing evaluation
     for name, r in results.items():
       print(f"{name:22s} win {r['win_rate']:6.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
 
-    # Dashed reference lines on the win-rate panel: every baseline, plus the learner's held-out score
+    # plotting agents results
     reference_lines = {name: r["win_rate"] for name, r in results.items() if name != "learner"}
     reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
     plot_history(check_path, pic_path, baselines=reference_lines)
+    # returning them (in case I want to keep them)
     return results
 
 
@@ -184,6 +190,6 @@ if __name__ == "__main__":
 
     # my agent
     print("Learner:")
-    print("one soldier; one alien; 5 x 5 map")
-    evaluate_learner("runs/checkpoint_xcom_one.pt", "runs/training_curves_one.png", size=5, n_soldiers=1, n_aliens=1, alien_hp=1, wall_segments=0)
+    print("one soldier; one alien; 8 X 8 map")
+    evaluate_learner("runs/checkpoint_xcom_small_one.pt", "runs/training_curves_small_one.png")
 
