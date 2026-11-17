@@ -85,7 +85,7 @@ def apply_mask_softmax(logits,masks):
   return dist, log_dist
 
 
-def get_action_ppo_xcom(network, obs, masks):
+def get_action_ppo_xcom(network, obs, masks, is_training=True):
   """Sample action from the distribution obtained from the policy network
 
     Args:
@@ -104,13 +104,19 @@ def get_action_ppo_xcom(network, obs, masks):
   # transforming observations and masks
   obs = torch.FloatTensor(obs).to(device)
   masks = torch.as_tensor(masks, dtype=torch.bool).to(device)
+
   # getting action_dist
   with torch.no_grad():
     action_logits = network(obs)
   action_dist,_ = apply_mask_softmax(action_logits,masks)
-  # sampling from distribution (drawing from probabilities - from research seems like torch.multinomial or distributions.Categorical could work)
-  actions = torch.multinomial(action_dist,1)
-  actions = torch.flatten(actions) #flattening to shape (6,)
+
+  if is_training:
+    # sampling from distribution 
+    actions = torch.multinomial(action_dist,1)
+    actions = torch.flatten(actions) #flattening to shape (6,)
+  else: # then we are evaluating
+    # getting the action with the highest probability
+    actions = torch.argmax(action_dist, dim=1) # Note: Gives same shape as multinomial after flattening
   return (actions.numpy(), action_dist.numpy()) # converting to numpy array (also can't convert while gpu)
 
 

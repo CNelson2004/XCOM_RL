@@ -8,9 +8,7 @@ from plots import plot_history
 
 # evaluate the policy given to it
 def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, **env_kwargs):
-    # Note: env_kwargs includes: map_size, num_soldiers, num_aliens, max_turns, reward_function, render_mode
-    # Defaults: 12,2,2,30,None,None
-    # (map is 12 x 12 with 2 soldiers, 2 aliens and 30 max turns)
+    # Note: env_kwargs includes: map_size, num_soldiers, num_aliens, max_turns, etc.
 
     # setting up environment
     env = XcomEnv(**env_kwargs)
@@ -141,16 +139,59 @@ def learning_agent(checkpoint):
     policy_network.eval() 
 
     def learning_policy(obs,mask):
-        actions, _ = get_action_ppo_xcom(policy_network,obs[None,:],mask[None,:])
+        actions, _ = get_action_ppo_xcom(policy_network,obs[None,:],mask[None,:],is_training=False)
         return int(actions[0])
 
     # These should go in as **envkwargs because they don't fit anythign else in the arguments
     return learning_policy
 
+def get_best_policy(hundred_epochs=5,name=None,n_battles=500):
+    # name = "final" then it checks for that appended onto end of everything
+    # None is default, which means it look for final and no appended on epochs
+    # hundred_epochs is how many epochs in the hundreds, so 5 represents 500 epochs
+    
+    agents = []
+    checkpoints = []
 
-def evaluate_learner(check_path, pic_path, n_battles=500):
+    # getting all epoch saves
+    for i in range(1,hundred_epochs+1): # hardcoded to assume 500 epochs (for now. Can modify to include epochs and save rate in parameters later)
+        if name:
+            checkpoint = load_checkpoint(f"runs/checkpoint_xcom_epoch{i*100}_{name}.pt")
+            checkpoints.append((f"runs/checkpoint_xcom_epoch{i*100}_{name}.pt",checkpoint))
+            agents.append(learning_agent(checkpoint))
+        else:
+            checkpoint = load_checkpoint(f"runs/checkpoint_xcom_epoch{i*100}.pt")
+            checkpoints.append((f"runs/checkpoint_xcom_epoch{i*100}.pt",checkpoint))
+            agents.append(learning_agent(checkpoint))
+
+
+    # getting final one (This is only needed if the saverate doesn't align with the last epoch. For now I assume it is needed)
+    # Will refactor if I feel it wastes too much time
+    if name:
+        checkpoint = load_checkpoint(f"runs/checkpoint_xcom_{name}.pt")
+        checkpoints.append((f"runs/checkpoint_xcom_{name}.pt",checkpoint))
+        agents.append(learning_agent(checkpoint))
+        env_kwargs = checkpoint["config"]["env_kwargs"]
+    else:
+        checkpoint = load_checkpoint("runs/checkpoint_xcom_final.pt")
+        checkpoints.append(("runs/checkpoint_xcom_final.pt",checkpoint))
+        agents.append(learning_agent(checkpoint))
+        env_kwargs = checkpoint["config"]["env_kwargs"]
+
+    # getting evaluation results for each
+    results = [evaluate(policy,flatten=True,n_battles=n_battles,init_seed=2_000_000,**env_kwargs) for policy in agents]
+
+    # checking them against each other to find best
+    win_rates = [r["win_rate"] for r in results]
+    index = int(np.argmax(win_rates))
+    # returning best checkpoint
+    return (checkpoints[index][0], checkpoints[index][1])
+    
+
+def evaluate_learner(hundred_epochs=5,name=None, n_battles=500):
     # getting environment variables
-    checkpoint = load_checkpoint(check_path)
+    check_path, checkpoint = get_best_policy(hundred_epochs,name,n_battles)
+    print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
 
     # setting up all agents and their related vars
@@ -162,14 +203,16 @@ def evaluate_learner(check_path, pic_path, n_battles=500):
       "learner": (learning_agent(checkpoint), True),  
     }
     # evaluating agents
-    results = {name: evaluate(policy, n_battles=n_battles, flatten=flatten, **env_kwargs) for name, (policy, flatten) in agents.items()}
+    results = {agent_name: evaluate(policy, n_battles=n_battles, flatten=flatten, **env_kwargs) for agent_name, (policy, flatten) in agents.items()}
     # printing evaluation
-    for name, r in results.items():
-      print(f"{name:22s} win {r['win_rate']:6.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
+    for agent_name, r in results.items():
+      print(f"{agent_name:22s} win {r['win_rate']:6.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
 
     # plotting agents results
-    reference_lines = {name: r["win_rate"] for name, r in results.items() if name != "learner"}
+    reference_lines = {agent_name: r["win_rate"] for agent_name, r in results.items() if agent_name != "learner"}
     reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
+
+    pic_path = f"runs/training_curves_{name}.png" if name else f"runs/training_curves_final.png"
     plot_history(check_path, pic_path, baselines=reference_lines)
     # returning them (in case I want to keep them)
     return results
@@ -177,19 +220,4 @@ def evaluate_learner(check_path, pic_path, n_battles=500):
 
 
 if __name__ == "__main__":
-    # creating baselines to compare against
-    # using random agent for evaluation
-    #print("Random:")
-    #print(evaluate(random_agent()))
-    # aggressive agent that chases aliens down
-    #print("Aggressive:")
-    #print(evaluate(scripted_agent()[0],flatten=False))
-    # caustious agent that waits for aliens to come to them
-    #print("Cautious:")
-    #print(evaluate(scripted_agent()[1],flatten=False))
-
-    # my agent
-    print("Learner:")
-    print("one soldier; one alien; 8 X 8 map")
-    evaluate_learner("runs/checkpoint_xcom_small_one.pt", "runs/training_curves_small_one.png")
-
+    evaluate_learner(hundred_epochs=3)

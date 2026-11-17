@@ -28,7 +28,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
 
   norm_epsilon = 1e-8
   max_grad_norm = 0.5
-  entropy_coef = 0.01
+  entropy_coef = 0.01 # Note: Higher entropy_coef allows more exploration (.01 vs .03)
 
   battles = 100
   num_steps = 2000
