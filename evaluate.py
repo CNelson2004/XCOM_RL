@@ -4,9 +4,10 @@ from env.xcom_sim import XcomEnv
 from agents.checkpoints import load_checkpoint
 from agents.networks import PolicyNetwork_Xcom
 from agents.ppo import get_action_ppo_xcom
+from plots import plot_history
 
 # evaluate the policy given to it
-def evaluate(policy, n_battles=500,init_seed=1_000_000,flatten=True,**env_kwargs):
+def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, **env_kwargs):
     # Note: env_kwargs includes: map_size, num_soldiers, num_aliens, max_turns, reward_function, render_mode
     # Defaults: 12,2,2,30,None,None
     # (map is 12 x 12 with 2 soldiers, 2 aliens and 30 max turns)
@@ -148,6 +149,27 @@ def learning_agent(path):
     return learning_policy
 
 
+def evaluate_learner(check_path, pic_path, n_battles=500, **env_kwargs):
+    aggressive, cautious = scripted_agent()
+    agents = {                     
+      "random": (random_agent(), True), # Note: True or False refers to need to flatten
+      "scripted (aggressive)": (aggressive, False),   
+      "scripted (cautious)": (cautious, False),
+      "learner": (learning_agent(check_path), True),  
+    }
+    results = {name: evaluate(policy, n_battles=n_battles, flatten=flatten, **env_kwargs) for name, (policy, flatten) in agents.items()}
+
+    for name, r in results.items():
+      print(f"{name:22s} win {r['win_rate']:6.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
+
+    # Dashed reference lines on the win-rate panel: every baseline, plus the learner's held-out score
+    reference_lines = {name: r["win_rate"] for name, r in results.items() if name != "learner"}
+    reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
+    plot_history(check_path, pic_path, baselines=reference_lines)
+    return results
+
+
+
 if __name__ == "__main__":
     # creating baselines to compare against
     # using random agent for evaluation
@@ -163,5 +185,5 @@ if __name__ == "__main__":
     # my agent
     print("Learner:")
     print("one soldier; one alien; 5 x 5 map")
-    print(evaluate(learning_agent("runs/checkpoint_xcom_one.pt"), size=5, n_soldiers=1, n_aliens=1, alien_hp=1, wall_segments=0))
+    evaluate_learner("runs/checkpoint_xcom_one.pt", "runs/training_curves_one.png", size=5, n_soldiers=1, n_aliens=1, alien_hp=1, wall_segments=0)
 

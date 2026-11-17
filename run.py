@@ -32,14 +32,6 @@ if __name__ == "__main__":
     run(size=5,n_soldiers=1,n_aliens=1,alien_hp=1,wall_segments=0)
 
 '''
-# To load in network later (would need to be used inside ppo_main)
-
-checkpoint = load_checkpoint("runs/checkpoint_xcom_final.pt")
-config = checkpoint["config"]
-policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
-policy_network.load_state_dict(checkpoint["policy"])
-policy_network.eval() 
-
 # how to plot from a saved checkpoint
 plot_history("runs/checkpoint_xcom_epoch200.pt", "runs/epoch200_curves.png")
 '''
