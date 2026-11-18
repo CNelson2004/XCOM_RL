@@ -1,7 +1,7 @@
 # run.py: train, save the network, then record one episode
 import os
 from train import ppo_main_cartpole, ppo_main_xcom
-from view.watch import record_episode_cartpole
+from watch import record_episode_cartpole
 
 # this is to check that moved code works with cartpole
 # also to practice making a checkpoint for a network

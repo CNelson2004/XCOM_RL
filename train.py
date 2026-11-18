@@ -51,7 +51,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
   env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
               "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
   config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
-            "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, # more hyperparameters
+            "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, # more hyperparameters
             "obs_size": obs_size, "action_size": action_size, # calculated vars
             "num_envs": num_envs, "env_kwargs" : env_kwargs} # environment vars
 
@@ -68,7 +68,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
   # Start main loop
   results_ppo = []
   loop = tqdm(total=epochs, position=0, leave=False)
-  history = {"win rate": [], "loss rate": [], "timeout rate": [], "avg entropy": [], "avg grad norm": [], "max grad norm": [], "illegals" : []} # illegals should always be 0
+  history = {"win rate": [], "loss rate": [], "timeout rate": [], "lr" : [], "avg entropy": [], "avg grad norm": [], "max grad norm": [], "value_loss" : [], "policy_loss" : [], "kl" : [], "illegals" : []} # illegals should always be 0
   # Note: there is no inner episode loop because we are runnign multiple environments which can end at different times
   for epoch in range(epochs):
     # Reset environment before the epoch loop
@@ -83,8 +83,15 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
     cum_rewards = [0 for i in range(num_envs)]  # Track cumulative rewards
     illegals = 0
     episodes = 0
+
+    # working out learning rate decay
+    # linear decay (straight line down to zero)
+    new_lr = lr * (1 - epoch/epochs)
+    history["lr"].append(new_lr)
+    for group in optim.param_groups:
+      group["lr"] = new_lr
     
-    # starting loop
+    # starting battles loop
     # when doing small battles on small maps you don't get enough data just through 100 battles, since so few steps are taken
     # thus we need to make sure enough steps are taken and enough battles are done to get enough data to learn from
     # each memory item is a step, thus we can count those
@@ -148,7 +155,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
     # Train
     dataset = RLDataset(memory) 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,drop_last=True) # dropping lat to not have weird edge case where std later is nan while normalizing.
-    entropy, norm, max_norm = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
+    entropy, norm, max_norm, value_loss, policy_loss, kl = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
 
     #computing rates for this epoch
     win_rate = the_results["win"]/episodes
@@ -161,6 +168,9 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
     history["avg entropy"].append(float(np.round(entropy,2)))
     history["avg grad norm"].append(float(np.round(norm,2)))
     history["max grad norm"].append(float(np.round(max_norm,2)))
+    history["value_loss"].append(float(np.round(value_loss,2)))
+    history["policy_loss"].append(float(np.round(policy_loss,2)))
+    history["kl"].append(float(np.round(kl,2)))
     history["illegals"].append(int(illegals))
 
     # Print results

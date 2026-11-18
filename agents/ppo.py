@@ -30,6 +30,9 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
   # clip function is torch.clamp(x, min, max)
 
   entropies = []
+  value_losses = []
+  policy_losses = []
+  KLs = []
   norms = []
 
   epoch = 0
@@ -52,10 +55,19 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       dist, log_dist = apply_mask_softmax(policy(state),mask)
       curr = dist.gather(1,action.unsqueeze(1)).squeeze(1) #Using gather to get one value from the row
       old = action_dist.gather(1,action.unsqueeze(1)).squeeze(1)
+      # kl measures how much one epoch's updates changed the policy
+      with torch.no_grad():
+        ratio = curr/old
+        log_ratio = torch.log(curr) - torch.log(old)
+        kl = (ratio - 1) - log_ratio
+        avg_kl = torch.mean(kl)
+      KLs.append(avg_kl.item())
       PolicyLoss = -torch.mean(torch.min((curr/old)*A_hat, torch.clamp(curr/old, 1-epsilon, 1+epsilon)*A_hat))
+      policy_losses.append(PolicyLoss.item())
       #Calculating ValueLoss
       # value(state) has shape (batch,1). It needs to be (batch,) to match target
       ValueLoss = torch.mean((target - value(state).squeeze(1))**2)
+      value_losses.append(ValueLoss.item())
       #CalculatingLoss
       # calculating entropy
       entropy = -torch.sum(dist * log_dist, dim=1)
@@ -73,7 +85,7 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       optim.step()
     epoch += 1
   # TODO: Add guard in case list is empty (no batch was processed. (This could be due to too few steps in a battle or something else))
-  return np.mean(entropies), np.mean(norms), np.max(norms)
+  return np.mean(entropies), np.mean(norms), np.max(norms), np.mean(value_losses), np.mean(policy_losses), np.mean(KLs)
     
 
 def apply_mask_softmax(logits,masks):

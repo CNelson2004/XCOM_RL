@@ -9,9 +9,9 @@ from IPython.display import HTML
 from IPython import display as ipythondisplay
 from gymnasium.wrappers import FlattenObservation
 
-from agents.ppo import get_action_ppo_cartpole
 from env.xcom_sim import XcomEnv, format_event
 from agents.checkpoints import load_checkpoint
+from agents.ppo import get_action_ppo_cartpole
 from evaluate import learning_agent
 
 ENV_KEYS = ("size", "n_soldiers", "n_aliens", "alien_hp", "wall_segments", "max_turns")
@@ -98,4 +98,4 @@ def watch(check_path, battles=3, first_seed=2_000_000, step_through=True, delay=
 
 
 if __name__ == "__main__":
-    watch("runs/checkpoint_xcom_final.pt")
+    watch("runs/checkpoint_xcom_two_gae.pt")

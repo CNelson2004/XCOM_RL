@@ -193,9 +193,9 @@ def get_best_policy(name=None,n_battles=300):
     # returning best checkpoint
     return (checkpoints[index][0], checkpoints[index][1])
     
-def evaluate_learner(name=None, n_battles=500):
+def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     # getting environment variables
-    check_path, checkpoint = get_best_policy(name)
+    check_path, checkpoint = get_best_policy(name,n_battles=n_battles/2)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
 
@@ -208,7 +208,7 @@ def evaluate_learner(name=None, n_battles=500):
       "learner": (learning_agent(checkpoint), True),  
     }
     # evaluating agents
-    results = {agent_name: evaluate(policy, n_battles=n_battles, flatten=flatten, desc=agent_name, **env_kwargs)
+    results = {agent_name: evaluate(policy, n_battles=n_battles, flatten=flatten, init_seed=init_seed, desc=agent_name, **env_kwargs)
             for agent_name, (policy, flatten) in agents.items()}
     # printing evaluation
     for agent_name, r in results.items():
