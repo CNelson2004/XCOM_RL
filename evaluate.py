@@ -1,13 +1,15 @@
 import numpy as np
+import glob, os, re
+from tqdm import tqdm
 from gymnasium.wrappers import FlattenObservation
 from env.xcom_sim import XcomEnv
-from agents.checkpoints import load_checkpoint
 from agents.networks import PolicyNetwork_Xcom
+from agents.checkpoints import load_checkpoint
 from agents.ppo import get_action_ppo_xcom
-from plots import plot_history
+from view.plots import plot_history
 
 # evaluate the policy given to it
-def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, **env_kwargs):
+def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, desc=None, **env_kwargs):
     # Note: env_kwargs includes: map_size, num_soldiers, num_aliens, max_turns, etc.
 
     # setting up environment
@@ -20,7 +22,9 @@ def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, **env_kwa
     alive = []
     turns = []
     # start loop
-    for i in range(n_battles):
+    # progress bar over battles; only shown when a desc is given, and removed when finished (leave=False)
+    # start battle loop
+    for i in tqdm(range(n_battles), desc=desc, leave=False, disable=desc is None):
         # have a set seed (reset gives first observation and action mask)
         obs, info = env.reset(seed=init_seed + i)
         done = False
@@ -36,13 +40,17 @@ def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, **env_kwa
         alive.append(info["soldiers_alive"])
         # getting the turn the battle ended on (basically number of turns taken)
         turns.append(info["turn"])
-    # returning win, loss, and timeout percentage (aka rate), how many soldiers alive (on average) and turns taken (on average)
-    return dict(win_rate=results.count("win")/n_battles, loss_rate=results.count("loss")/n_battles, timeout_rate=results.count("timeout")/n_battles,
-                    soldiers_alive=float(np.mean(alive)), turns=float(np.mean(turns)))
+    # win rate and its 95% margin of error (normal approximation for a yes/no outcome over n_battles)
+    win_rate = results.count("win") / n_battles
+    ci95 = 1.96 * np.sqrt(win_rate * (1 - win_rate) / n_battles)
+    # returning win, loss, and timeout rates, the win rate's margin of error,
+    # how many soldiers were alive (on average) and turns taken (on average)
+    return dict(win_rate=win_rate, ci95=float(ci95), # win rate and a confidence interval (so we can check if we are in margin of error of baseline)
+                loss_rate=results.count("loss") / n_battles, timeout_rate=results.count("timeout") / n_battles, # otheri nteresting rates
+                soldiers_alive=float(np.mean(alive)), turns=float(np.mean(turns))) # other interesting metrics
 
-
-# making agent that chooses actions at random so we have a baseline to beat
 def random_agent():
+    # making agent that chooses actions at random so we have a baseline to beat
     # Note: doesn't learn, just a metric to use
     # setting rng
     # Note: rng must be set outside the policy itself so it uses the same rng each time
@@ -61,7 +69,6 @@ def random_agent():
         # making sure index is int 
         return int(chosen)
     return random_policy
-
 
 def scripted_agent(fixed_position=True):
     # Note: doesn't learn, just a metric to use
@@ -145,41 +152,40 @@ def learning_agent(checkpoint):
     # These should go in as **envkwargs because they don't fit anythign else in the arguments
     return learning_policy
 
-def get_best_policy(hundred_epochs=5,name=None,n_battles=500):
+def epoch_of(path):
+    """The epoch number inside a checkpoint's file name, e.g. 200 from 'checkpoint_xcom_epoch200.pt'."""
+    return int(re.search(r"epoch(\d+)", os.path.basename(path)).group(1))
+
+def epoch_checkpoints(name=None):
+    """Paths of one run's epoch checkpoints, in training order."""
+    pattern = f"runs/checkpoint_xcom_epoch*_{name}.pt" if name else "runs/checkpoint_xcom_epoch*.pt"
+    expected = rf"checkpoint_xcom_epoch\d+_{re.escape(name)}\.pt" if name else r"checkpoint_xcom_epoch\d+\.pt"
+    paths = [p for p in glob.glob(pattern) if re.fullmatch(expected, os.path.basename(p))]
+    if not paths: print("No checkpoints found that match name")
+    return sorted(paths, key=epoch_of)
+
+def get_best_policy(name=None,n_battles=300):
     # name = "final" then it checks for that appended onto end of everything
     # None is default, which means it look for final and no appended on epochs
-    # hundred_epochs is how many epochs in the hundreds, so 5 represents 500 epochs
     
     agents = []
     checkpoints = []
-
     # getting all epoch saves
-    for i in range(1,hundred_epochs+1): # hardcoded to assume 500 epochs (for now. Can modify to include epochs and save rate in parameters later)
-        if name:
-            checkpoint = load_checkpoint(f"runs/checkpoint_xcom_epoch{i*100}_{name}.pt")
-            checkpoints.append((f"runs/checkpoint_xcom_epoch{i*100}_{name}.pt",checkpoint))
-            agents.append(learning_agent(checkpoint))
-        else:
-            checkpoint = load_checkpoint(f"runs/checkpoint_xcom_epoch{i*100}.pt")
-            checkpoints.append((f"runs/checkpoint_xcom_epoch{i*100}.pt",checkpoint))
-            agents.append(learning_agent(checkpoint))
-
-
-    # getting final one (This is only needed if the saverate doesn't align with the last epoch. For now I assume it is needed)
-    # Will refactor if I feel it wastes too much time
-    if name:
-        checkpoint = load_checkpoint(f"runs/checkpoint_xcom_{name}.pt")
-        checkpoints.append((f"runs/checkpoint_xcom_{name}.pt",checkpoint))
+    for path in epoch_checkpoints(name): 
+        checkpoint = load_checkpoint(path)
+        checkpoints.append((path,checkpoint))
         agents.append(learning_agent(checkpoint))
-        env_kwargs = checkpoint["config"]["env_kwargs"]
-    else:
-        checkpoint = load_checkpoint("runs/checkpoint_xcom_final.pt")
-        checkpoints.append(("runs/checkpoint_xcom_final.pt",checkpoint))
-        agents.append(learning_agent(checkpoint))
-        env_kwargs = checkpoint["config"]["env_kwargs"]
+    # I can just get one since all the epochs work off of the same env_kwargs
+    env_kwargs = checkpoint["config"]["env_kwargs"]
+
 
     # getting evaluation results for each
-    results = [evaluate(policy,flatten=True,n_battles=n_battles,init_seed=2_000_000,**env_kwargs) for policy in agents]
+    results = []
+    for (path, _), policy in tqdm(list(zip(checkpoints, agents)), desc="checkpoints"):
+        r = evaluate(policy, flatten=True, n_battles=n_battles, init_seed=2_000_000,
+                     desc=os.path.basename(path), **env_kwargs)
+        results.append(r)
+        tqdm.write(f"{os.path.basename(path):40s} win {r['win_rate']:6.1%} ± {r['ci95']:4.1%}")
 
     # checking them against each other to find best
     win_rates = [r["win_rate"] for r in results]
@@ -187,10 +193,9 @@ def get_best_policy(hundred_epochs=5,name=None,n_battles=500):
     # returning best checkpoint
     return (checkpoints[index][0], checkpoints[index][1])
     
-
-def evaluate_learner(hundred_epochs=5,name=None, n_battles=500):
+def evaluate_learner(name=None, n_battles=500):
     # getting environment variables
-    check_path, checkpoint = get_best_policy(hundred_epochs,name,n_battles)
+    check_path, checkpoint = get_best_policy(name)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
 
@@ -203,10 +208,11 @@ def evaluate_learner(hundred_epochs=5,name=None, n_battles=500):
       "learner": (learning_agent(checkpoint), True),  
     }
     # evaluating agents
-    results = {agent_name: evaluate(policy, n_battles=n_battles, flatten=flatten, **env_kwargs) for agent_name, (policy, flatten) in agents.items()}
+    results = {agent_name: evaluate(policy, n_battles=n_battles, flatten=flatten, desc=agent_name, **env_kwargs)
+            for agent_name, (policy, flatten) in agents.items()}
     # printing evaluation
     for agent_name, r in results.items():
-      print(f"{agent_name:22s} win {r['win_rate']:6.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
+            print(f"{agent_name:22s} win {r['win_rate']:6.1%} ± {r['ci95']:4.1%} loss {r['loss_rate']:4.0%} timeout {r['timeout_rate']:4.0%}")
 
     # plotting agents results
     reference_lines = {agent_name: r["win_rate"] for agent_name, r in results.items() if agent_name != "learner"}
@@ -217,7 +223,5 @@ def evaluate_learner(hundred_epochs=5,name=None, n_battles=500):
     # returning them (in case I want to keep them)
     return results
 
-
-
 if __name__ == "__main__":
-    evaluate_learner(hundred_epochs=3)
+    evaluate_learner()

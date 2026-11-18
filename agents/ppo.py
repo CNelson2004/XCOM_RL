@@ -35,18 +35,17 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
   epoch = 0
   while epoch < policy_epochs:
     for mem in memory_dataloader:
-      #getting R-hat_t
-      state,action,action_dist,mask,R_hat = mem
+      #getting advantage
+      state,action,action_dist,mask,advantage,target = mem
       # making sure everything is on the correct device (and correct type)
       state = state.float().to(device)
       action = action.to(device)
       action_dist = action_dist.float().to(device)
       mask = mask.bool().to(device)
-      R_hat = R_hat.float().to(device) # using .float() because it plays nicer than the FloatTensor I used with dqn
-      #Calculating A-hat_t
-      V = value(state).squeeze(1)
+      advantage = advantage.float().to(device)
+      target = target.float().to(device)
       # making sure advantage gets detached
-      A_hat = R_hat - V.detach()
+      A_hat = advantage
       # normalizing advantage
       A_hat = (A_hat - torch.mean(A_hat))/(torch.std(A_hat) + norm_epsilon) # eps is here to prevent the bottom from being zero
       #Calculating PolicyLoss
@@ -55,7 +54,8 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       old = action_dist.gather(1,action.unsqueeze(1)).squeeze(1)
       PolicyLoss = -torch.mean(torch.min((curr/old)*A_hat, torch.clamp(curr/old, 1-epsilon, 1+epsilon)*A_hat))
       #Calculating ValueLoss
-      ValueLoss = torch.mean((R_hat - V)**2)
+      # value(state) has shape (batch,1). It needs to be (batch,) to match target
+      ValueLoss = torch.mean((target - value(state).squeeze(1))**2)
       #CalculatingLoss
       # calculating entropy
       entropy = -torch.sum(dist * log_dist, dim=1)

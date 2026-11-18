@@ -16,8 +16,9 @@ from gymnasium.wrappers import FlattenObservation
 
 from env.xcom_sim import XcomEnv
 
+device = torch.device("cpu")
 
-def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
   lr = 3e-4
   gamma = 0.99
@@ -28,7 +29,8 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
 
   norm_epsilon = 1e-8
   max_grad_norm = 0.5
-  entropy_coef = 0.01 # Note: Higher entropy_coef allows more exploration (.01 vs .03)
+  entropy_coef = entropy_coef # Note: Higher entropy_coef allows more exploration (.01 vs .03. More stable vs more exploration)
+  lambd = 0.95
 
   battles = 100
   num_steps = 2000
@@ -48,7 +50,7 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
   # setting config to be used for checkpoint
   env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
               "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
-  config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, # hyperparameters
+  config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
             "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, # more hyperparameters
             "obs_size": obs_size, "action_size": action_size, # calculated vars
             "num_envs": num_envs, "env_kwargs" : env_kwargs} # environment vars
@@ -98,23 +100,40 @@ def ppo_main_xcom(epochs=3,save_rate=100,size=12,n_soldiers=2,n_aliens=2,alien_h
       # checking masking is working
       illegals += np.sum(info["illegal"])
 
+      # getting value of states (to be used for gae)
+      with torch.no_grad():
+        # obs must be a tensor to work properly
+        # getting values to correct dimension to (6,)
+        # turning it back into plain numpy numbers
+        values = value_network(torch.FloatTensor(obs).to(device)).squeeze(1).numpy()
+
       # storing steps
       for i in range(num_envs):
-        # updating rollout
-        rollouts[i].append((obs[i],actions[i],action_dists[i],masks[i],rewards[i]))
+        # updating rollout (storing extra info to be used for gae)
+        rollouts[i].append((obs[i],actions[i],action_dists[i],masks[i],rewards[i],values[i],terminateds[i],))
         # updating rewards
         cum_rewards[i] += rewards[i]
 
       # checking if done
       dones = [term or trunc for term,trunc in zip(terminateds,truncateds)]
+
       for i, don in enumerate(dones):
         if don:
           # cleaning up now that it is done
           # doing double check for results and illegals
           the_results[info["final_info"]["result"][i]] += 1
           illegals += int(info["final_info"]["illegal"][i])
+          # getting bootstrap value for values in rollout for gae
+          if terminateds[i]: # if terminated = 1, which means battle was won/lost
+            # final value is 0
+            bootstrap = 0.0
+          else:
+            # value network's estimate of the final observation
+            with torch.no_grad():
+              final_obs = info["final_obs"][i]
+              bootstrap = value_network(torch.FloatTensor(final_obs[None, :]).to(device)).item()
           # rollout to memory
-          memory = calculate_return_xcom(memory, rollouts[i], gamma)
+          memory = calculate_return_xcom(memory, rollouts[i], bootstrap, gamma, lambd)
           # recording cumulative rewards for episode
           total_rewards.append(cum_rewards[i])
           # clearing out rollout and cumulative rewards 

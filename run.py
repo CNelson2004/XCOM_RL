@@ -1,15 +1,15 @@
 # run.py: train, save the network, then record one episode
 import os
 from train import ppo_main_cartpole, ppo_main_xcom
-from watch import record_episode_cartpole
+from view.watch import record_episode_cartpole
 
 # this is to check that moved code works with cartpole
 # also to practice making a checkpoint for a network
 
-def run(is_XCOM = True, epochs=500, save_rate=100, size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def run(is_XCOM = True, epochs=500, save_rate=100, entropy_coef=0.01, size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
 
     if is_XCOM:
-        results_ppo, policy_network, history = ppo_main_xcom(epochs,save_rate=save_rate,size=size,n_soldiers=n_soldiers,n_aliens=n_aliens,alien_hp=alien_hp,wall_segments=wall_segments)
+        results_ppo, policy_network, history = ppo_main_xcom(epochs,save_rate=save_rate,entropy_coef=entropy_coef,size=size,n_soldiers=n_soldiers,n_aliens=n_aliens,alien_hp=alien_hp,wall_segments=wall_segments)
         # plotting done when we do evaluation, so it isn't done here
         # add env.render()?
 
@@ -26,4 +26,4 @@ def run(is_XCOM = True, epochs=500, save_rate=100, size=12,n_soldiers=2,n_aliens
 
 if __name__ == "__main__":
     #run(is_XCOM = False) # for running cartpole
-    run()
+    run(epochs=300,save_rate=50)
