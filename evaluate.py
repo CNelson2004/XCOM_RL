@@ -195,7 +195,7 @@ def get_best_policy(name=None,n_battles=300):
     
 def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     # getting environment variables
-    check_path, checkpoint = get_best_policy(name,n_battles=n_battles/2)
+    check_path, checkpoint = get_best_policy(name,n_battles=n_battles//2)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
 
@@ -218,10 +218,11 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     reference_lines = {agent_name: r["win_rate"] for agent_name, r in results.items() if agent_name != "learner"}
     reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
 
+    check_path = f"runs/checkpoint_xcom_{name}.pt" if name else f"runs/checkpoint_xcom_final.pt"
     pic_path = f"runs/training_curves_{name}.png" if name else f"runs/training_curves_final.png"
     plot_history(check_path, pic_path, baselines=reference_lines)
     # returning them (in case I want to keep them)
     return results
 
 if __name__ == "__main__":
-    evaluate_learner()
+     evaluate_learner()

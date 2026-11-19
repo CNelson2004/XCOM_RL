@@ -165,12 +165,12 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
     history["win rate"].append(win_rate)
     history["loss rate"].append(loss_rate)
     history["timeout rate"].append(timeout_rate)
-    history["avg entropy"].append(float(np.round(entropy,2)))
-    history["avg grad norm"].append(float(np.round(norm,2)))
-    history["max grad norm"].append(float(np.round(max_norm,2)))
-    history["value_loss"].append(float(np.round(value_loss,2)))
-    history["policy_loss"].append(float(np.round(policy_loss,2)))
-    history["kl"].append(float(np.round(kl,2)))
+    history["avg entropy"].append(float(np.round(entropy,4)))
+    history["avg grad norm"].append(float(np.round(norm,4)))
+    history["max grad norm"].append(float(np.round(max_norm,4)))
+    history["value_loss"].append(float(np.round(value_loss,4)))
+    history["policy_loss"].append(float(np.round(policy_loss,4)))
+    history["kl"].append(float(np.round(kl,4)))
     history["illegals"].append(int(illegals))
 
     # Print results

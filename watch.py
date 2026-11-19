@@ -98,4 +98,4 @@ def watch(check_path, battles=3, first_seed=2_000_000, step_through=True, delay=
 
 
 if __name__ == "__main__":
-    watch("runs/checkpoint_xcom_two_gae.pt")
+    watch("runs/checkpoint_xcom_lr_decay.pt")
