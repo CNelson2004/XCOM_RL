@@ -1,6 +1,6 @@
 """Rule tests for the simulator. Run with: pytest test_xcom_sim.py"""
 import numpy as np
-from env.xcom_sim import Battle, XcomEnv, line, SOLDIER, ALIEN, WALL, FLOOR, UNIT_FEATURES
+from env.xcom_sim import Battle, XcomEnv, line, format_event, SOLDIER, ALIEN, WALL, FLOOR, UNIT_FEATURES
 
 
 def open_battle():
@@ -234,4 +234,68 @@ def test_vector_info_always_has_illegal_and_result():
             assert not info["illegal"][i] and info["result"][i] is None      # new battle's placeholders
             assert info["final_info"]["result"][i] in ("win", "loss", "timeout")
     assert all_done_steps > 0          # the situation that used to drop the keys did occur
-    
+
+
+def test_end_turn_event_reports_tus_kept():
+    """Ending a turn records the soldier's TUs left, before the alien turn begins."""
+    env = XcomEnv()
+    env.reset(seed=0)
+    b = env.battle
+    b.grid[1:-1, 1:-1] = FLOOR                       # open map, so a step is legal
+    b.units[2].tu = b.units[3].tu = 0                # no reaction fire
+    u = b.units[b.active]
+    env.step(4)                                      # one step south costs 4 TU
+    _, _, _, _, info = env.step(env.action_space.n - 1)
+    ends = [e for e in info["events"] if e["type"] == "end_turn"]
+    assert len(ends) == 1
+    e = ends[0]
+    assert e["unit"] == "soldier 0" and e["tu_max"] == u.max_tu and e["tu_left"] == u.max_tu - 4
+    assert e["aliens_in_view"] == len(b.visible_enemies(SOLDIER))   # nobody moved since the turn ended
+    assert format_event(e).startswith(f"soldier 0 ends turn with {u.max_tu - 4}/{u.max_tu} TU")
+
+
+def test_end_turn_event_comes_before_alien_turn_and_only_on_end_turn():
+    env = XcomEnv()
+    env.reset(seed=0)
+    last = env.action_space.n - 1
+    _, _, _, _, info = env.step(last)                # soldier 0 ends: no alien turn yet
+    assert [e["type"] for e in info["events"]] == ["end_turn"]
+    _, _, _, _, info = env.step(last)                # soldier 1 ends: the aliens move after the record
+    types = [e["type"] for e in info["events"]]
+    assert types[0] == "end_turn" and "alien_turn" in types
+    assert types.index("end_turn") < types.index("alien_turn")
+    obs, info = env.reset(seed=0)
+    for a in range(8):                               # a move never produces an end_turn record
+        if info["action_mask"][a]:
+            _, _, _, _, info = env.step(a)
+            assert all(e["type"] != "end_turn" for e in info["events"])
+            break
+
+
+def test_shot_event_reports_hp_lost_capped_and_max_hp():
+    """hp_lost is the HP the target actually lost (never more than it had); target_max_hp is its full HP."""
+    b, s, a = open_battle()
+    b.units[3].tu = 0; a.tu = 0                     # no reaction fire back
+    a.hp = 1                                         # any hit overkills
+    for _ in range(50):                              # keep shooting until a hit lands
+        s.tu = s.max_tu
+        b.events = []
+        b.shoot(s, a, "snap")
+        e = b.events[0]
+        assert e["target_max_hp"] == a.max_hp
+        if e["hit"]:
+            assert e["hp_lost"] == 1 and e["damage"] >= 1 and e["killed"]
+            break
+        assert e["hp_lost"] == 0
+    else:
+        raise AssertionError("no hit in 50 shots")
+
+
+def test_units_with_identical_stats_keep_their_own_names():
+    """A dead alien and a living one on the same tile must not be mixed up (units compare by identity)."""
+    b = Battle(size=12, n_soldiers=2, n_aliens=2, seed=0)
+    a, c = b.units[2], b.units[3]
+    a.hp = c.hp = 0
+    a.y, a.x, c.y, c.x = 5, 5, 5, 5
+    a.tu = c.tu = 0                                  # every field now equal
+    assert b.name(a) == "alien a" and b.name(c) == "alien b"

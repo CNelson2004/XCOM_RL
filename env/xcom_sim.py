@@ -22,7 +22,7 @@ RIFLE = Weapon("rifle", 30, (0.25, 0.60), (0.80, 1.10))
 PLASMA_PISTOL = Weapon("plasma pistol", 52, (0.30, 0.65), (0.60, 0.85))
 
 
-@dataclass
+@dataclass(eq=False)          # compare units by identity: two units with equal stats are still different units
 class Unit:
     side: int
     y: int
@@ -193,11 +193,13 @@ class Battle:
         u.tu -= u.shot_cost(mode)
         p_hit = self.hit_chance(u, mode)
         dmg = 0
+        hp_before = target.hp
         if self.rng.random() < p_hit:
             dmg = max(0, int(self.rng.integers(0, 2 * u.weapon.power + 1)) - target.armor)   # 0-200% of power
             target.hp = max(0, target.hp - dmg)
         self.events.append(dict(type="shot", shooter=u.side, mode=mode, reaction=reaction,
                                 hit=dmg > 0, damage=dmg, killed=not target.alive,
+                                hp_lost=hp_before - target.hp, target_max_hp=target.max_hp,   # damage capped at HP it had
                                 shooter_name=self.name(u), target_name=self.name(target),
                                 target_hp=target.hp, hit_chance=round(p_hit, 2)))
         if not target.alive:
@@ -389,6 +391,9 @@ class XcomEnv(gym.Env):
         elif action < 8 + 2 * self.A:
             i, mode = self.decode_shot(action)
             b.shoot(u, self._aliens()[i], mode)
+        if action == self.action_space.n - 1:                          # soldier chose to end the turn: record what it kept
+            b.events.append(dict(type="end_turn", unit=b.name(u), tu_left=u.tu, tu_max=u.max_tu,
+                                 aliens_in_view=len(b.visible_enemies(SOLDIER)), turn=b.turn))
         if action == self.action_space.n - 1 or not u.alive:
             b.end_unit_turn()
         res = b.result()
@@ -438,6 +443,10 @@ def format_event(e):
         return f"spotted {e['unit']} at {e['at']}"
     if e["type"] == "lost_sight":
         return f"lost sight of {e['unit']}"
+    if e["type"] == "end_turn":
+        seen = e["aliens_in_view"]
+        return (f"{e['unit']} ends turn with {e['tu_left']}/{e['tu_max']} TU "
+                f"({seen} alien{'s' if seen != 1 else ''} in view)")
     if e["type"] == "alien_turn":
         return f"--- alien turn {e['turn']} ---"
     if e["type"] == "new_turn":

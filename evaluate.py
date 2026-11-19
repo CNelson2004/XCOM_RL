@@ -225,4 +225,4 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     return results
 
 if __name__ == "__main__":
-     evaluate_learner()
+    evaluate_learner()

@@ -18,7 +18,7 @@ from env.xcom_sim import XcomEnv
 
 device = torch.device("cpu")
 
-def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
   lr = 3e-4
   gamma = 0.99
@@ -43,12 +43,12 @@ def ppo_main_xcom(epochs=3,save_rate=100,entropy_coef=0.01,size=12,n_soldiers=2,
   # making the parallel XCOM environments
   num_envs = 6
   envs = AsyncVectorEnv(
-      [lambda: FlattenObservation(XcomEnv(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
+      [lambda: FlattenObservation(XcomEnv(reward_fn=reward_fn,size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
 
   # setting config to be used for checkpoint
-  env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
+  env_kwargs = {"reward_fn" : reward_fn.__name__, "size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
               "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
   config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
             "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, # more hyperparameters

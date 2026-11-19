@@ -69,7 +69,7 @@ def watch(check_path, battles=3, first_seed=2_000_000, step_through=True, delay=
     checkpoint = load_checkpoint(check_path)
     config = checkpoint["config"]
     # environment settings from the checkpoint (works whether they are under "env" or stored flat)
-    env_kwargs = config.get("env_kwargs") or {k: config[k] for k in ENV_KEYS if k in config}
+    env_kwargs = {k: v for k, v in config["env_kwargs"].items() if k != "reward_fn"} # removing reward_fn because it causes watching to break, but we don't need it.
     policy = learning_agent(checkpoint)
 
     env = FlattenObservation(XcomEnv(**env_kwargs))   # the network sees the same flat observation as in training
@@ -98,4 +98,4 @@ def watch(check_path, battles=3, first_seed=2_000_000, step_through=True, delay=
 
 
 if __name__ == "__main__":
-    watch("runs/checkpoint_xcom_lr_decay.pt")
+    watch("runs/checkpoint_xcom_final.pt")
