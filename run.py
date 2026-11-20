@@ -27,11 +27,11 @@ def run(is_XCOM = True, epochs=500, reward_fn = None, save_rate=100, entropy_coe
         print("Video saved in the video/ folder")
 
 def run_and_evaluate(epochs=300,reward_fn=tu_reward,save_rate=50,name=None, n_battles=500, init_seed=1_000_000):
-    run(epochs,save_rate,reward_fn)
-    evaluate_learner(name, n_battles, init_seed)
+    run(epochs=epochs,save_rate=save_rate,reward_fn=reward_fn)
+    evaluate_learner(name=name, n_battles=n_battles, init_seed=init_seed)
 
 
 if __name__ == "__main__":
     #run(is_XCOM = False) # for running cartpole
     #run(epochs=300,reward_fn=tu_reward,save_rate=50)
-    run_and_evaluate()
+    run_and_evaluate(reward_fn=tu_and_damage_reward)

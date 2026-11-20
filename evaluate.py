@@ -177,6 +177,8 @@ def get_best_policy(name=None,n_battles=300):
         agents.append(learning_agent(checkpoint))
     # I can just get one since all the epochs work off of the same env_kwargs
     env_kwargs = checkpoint["config"]["env_kwargs"]
+    # the reward isn't needed to play battles, thus we drop it, because it causes errors
+    env_kwargs.pop("reward_fn", None)    
 
 
     # getting evaluation results for each
@@ -198,6 +200,8 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     check_path, checkpoint = get_best_policy(name,n_battles=n_battles//2)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
+    # the reward isn't needed to play battles, thus we drop it, because it causes errors
+    env_kwargs.pop("reward_fn", None)  
 
     # setting up all agents and their related vars
     aggressive, cautious = scripted_agent()
