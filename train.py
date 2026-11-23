@@ -14,44 +14,47 @@ from agents.checkpoints import save_checkpoint
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode
 from gymnasium.wrappers import FlattenObservation
 
-from env.xcom_sim import XcomEnv
+from env.xcom_sim import XcomEnv, sparse_reward
 
 device = torch.device("cpu")
 
-def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, alien_behavior="hunt", entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, alien_behavior="hunt", entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
-  lr = 3e-4
+  lr = 5e-4
   gamma = 0.995
   batch_size = 256
   epsilon = 0.2
   policy_epochs = 5
   hidden_size = 128
+  min_lr_frac = 0.1
 
   norm_epsilon = 1e-8
-  max_grad_norm = 0.5
+  max_policy_grad = 0.5
+  max_value_grad = 1.0
   entropy_coef = entropy_coef # Note: Higher entropy_coef allows more exploration (.01 vs .03. More stable vs more exploration)
   lambd = 0.95
 
-  battles = 100
   num_steps = 2000
   max_turns=30
+  num_envs = 6
 
   obs_size = 5 * size * size + 10 #size of total state model can see (flattened obs: grid: (12 x 12)*5 + unit: 10)
   action_size = 8 + 2 * n_aliens + 1 #number of actions that can be taken (8 types of movement, 2 shots for each alien, and passing turn)
 
+  env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens, "alien_behavior": alien_behavior,
+              "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns": max_turns}
+
   # Init environment
   # making the parallel XCOM environments
-  num_envs = 6
   envs = AsyncVectorEnv(
-      [lambda: FlattenObservation(XcomEnv(reward_fn=reward_fn,alien_behavior=alien_behavior,size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
+      [lambda: FlattenObservation(XcomEnv(reward_fn=reward_fn, **env_kwargs)) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
 
   # setting config to be used for checkpoint
-  env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens, "alien_behavior" : alien_behavior,
-              "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
   config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
-            "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, # more hyperparameters
+            "norm_epsilon" : norm_epsilon, "max_policy_grad" : max_policy_grad, "max_value_grad" : max_value_grad, "num_steps" : num_steps,
+            "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, "min_lr_frac" : min_lr_frac, # more hyperparameters
             "obs_size": obs_size, "action_size": action_size, # calculated vars
             "num_envs": num_envs, "env_kwargs" : env_kwargs, "reward_fn" : reward_fn.__name__} # environment vars
 
@@ -87,6 +90,9 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, alien_behavior="hunt",
     # working out learning rate decay
     # linear decay (straight line down to zero)
     new_lr = lr * (1 - epoch/epochs)
+    # not letting learning rate go to zero
+    min_lr= lr * min_lr_frac
+    if new_lr < min_lr: new_lr = min_lr
     history["lr"].append(new_lr)
     for group in optim.param_groups:
       group["lr"] = new_lr
@@ -155,7 +161,7 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, alien_behavior="hunt",
     # Train
     dataset = RLDataset(memory) 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,drop_last=True) # dropping lat to not have weird edge case where std later is nan while normalizing.
-    entropy, norm, max_norm, policy_norm, value_norm, value_loss, policy_loss, kl = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
+    entropy, norm, max_norm, policy_norm, value_norm, value_loss, policy_loss, kl = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_policy_grad, max_value_grad, entropy_coef)
 
     #computing rates for this epoch
     win_rate = the_results["win"]/episodes

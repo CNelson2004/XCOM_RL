@@ -5,7 +5,7 @@ from itertools import chain
 
 device = torch.device("cpu")
 
-def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epochs, norm_epsilon, max_grad_norm, entropy_coef):
+def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epochs, norm_epsilon, max_policy_grad, max_value_grad, entropy_coef):
   """Implement PPO policy and value network updates. Iterate over your entire
      memory the number of times indicated by policy_epochs.
 
@@ -81,9 +81,9 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       Loss.backward()
       # clamping gradient (Must be done after zero_grad and .backward)
       # Note: logging gradient norm to see if clipping is doing its job
-      policy_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(),max_grad_norm)
+      policy_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(),max_policy_grad)
       policy_norms.append(policy_norm.item())
-      value_norm = torch.nn.utils.clip_grad_norm_(value.parameters(),max_grad_norm)
+      value_norm = torch.nn.utils.clip_grad_norm_(value.parameters(),max_value_grad)
       value_norms.append(value_norm.item())
       norm = float(np.sqrt(policy_norm.item()**2 + value_norm.item()**2))
       norms.append(norm)

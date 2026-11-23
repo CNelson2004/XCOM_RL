@@ -4,7 +4,7 @@
     plot_history(history, "runs/training_curves.png",
                  baselines={"random": 0.126, "scripted (cautious)": 0.316})
 
-    # or from a checkpoint saved with save_checkpoint:
+    # or from a checkpoint saved with save_checkpoint (clip thresholds are then read from its config):
     plot_history("runs/checkpoint_xcom_epoch500.pt", "runs/epoch500_curves.png")
 
 Panels (all share the epoch axis, so you can read down a column to line events up):
@@ -73,7 +73,7 @@ def _reference(ax, y, text, x_frac=0.98, ha="right"):
     """A dashed reference line with a small label sitting just above it."""
     ax.axhline(y, color=MUTED, linewidth=1, linestyle=(0, (4, 3)), zorder=1)
     ax.annotate(text, (x_frac, y), xycoords=("axes fraction", "data"), xytext=(0, 2),
-                textcoords="offset points", ha=ha, va="bottom", fontsize=8, color=INK_2, zorder=1.5,
+                textcoords="offset points", ha=ha, va="bottom", fontsize=8, color=INK_2, zorder=5,
                 bbox=dict(boxstyle="round,pad=0.1", fc=SURFACE, ec="none"))
 
 
@@ -106,15 +106,24 @@ def _line_panel(ax, history, x, title, key, color=BLUE, label_fmt="{:.3g}", what
 
 
 def plot_history(history, path="runs/training_curves.png", baselines=None, window=10,
-                 max_grad_norm=0.5, title=None):
+                 max_policy_grad=None, max_value_grad=None, max_grad_norm=None, title=None, trusted=False):
     """history: the dict from ppo_main_xcom, or a path to a .pt checkpoint containing one.
     baselines: optional {"name": win rate} drawn as dashed reference lines on the outcomes panel.
     window: epochs in the win/loss/timeout moving average (each epoch's rates are noisy).
-    max_grad_norm: the clipping threshold, drawn on the per-network gradient-norm panels.
+    max_policy_grad, max_value_grad: each network's clipping threshold, drawn on its gradient panel.
+    max_grad_norm: the single combined threshold used by older runs.
+        Any threshold left as None is read from the checkpoint's config when given a path, else 0.5.
+    trusted: True also loads older checkpoints that stored a function in their config (your own files only).
     """
+    config = {}
     if isinstance(history, str):
         import torch
-        history = torch.load(history)["history"]
+        checkpoint = torch.load(history, weights_only=not trusted)
+        history, config = checkpoint["history"], checkpoint.get("config", {})
+    combined = config.get("max_grad_norm", 0.5)            # older runs: one clip for both networks
+    max_grad_norm = combined if max_grad_norm is None else max_grad_norm
+    max_policy_grad = config.get("max_policy_grad", combined) if max_policy_grad is None else max_policy_grad
+    max_value_grad = config.get("max_value_grad", combined) if max_value_grad is None else max_value_grad
     n = len(history.get(KEYS["win"], []))
     if n == 0:
         raise ValueError("history has no epochs to plot")
@@ -191,14 +200,14 @@ def plot_history(history, path="runs/training_curves.png", baselines=None, windo
 
     # Row 4: each network's own gradient norm before its clip (left: value, right: policy,
     # matching the value loss | policy loss row above)
-    for col, key, label, color in ((0, "value_norm", "Value network gradient norm", ORANGE),
-                                   (1, "policy_norm", "Policy network gradient norm", BLUE)):
+    for col, key, label, color, clip in ((0, "value_norm", "Value network gradient norm", ORANGE, max_value_grad),
+                                         (1, "policy_norm", "Policy network gradient norm", BLUE, max_policy_grad)):
         ax = axes[3, col]
         ys = _line_panel(ax, history, x, f"{label} (average)", key, color=color, label_fmt="{:.2f}",
                          what=f"{label.split(' gradient')[0].lower()} gradient norm")
         if ys is not None:
-            _reference(ax, max_grad_norm, f"clip at {max_grad_norm}")
-            ax.set_ylim(0, max(max_grad_norm * 1.3, float(np.nanmax(ys)) * 1.15))
+            _reference(ax, clip, f"clip at {clip:g}", x_frac=0.02, ha="left")   # left: clear of the end label
+            ax.set_ylim(0, max(clip * 1.3, float(np.nanmax(ys)) * 1.15))
 
     fig.savefig(path, dpi=110, facecolor=SURFACE)
     plt.close(fig)                          # free the figure's memory
