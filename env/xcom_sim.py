@@ -9,6 +9,7 @@ SOLDIER, ALIEN = 0, 1
 DIRS = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]  # (dy, dx), N first, clockwise
 SIGHT = 20                       # tiles, daytime
 MOVE_TU = (4, 6)                 # orthogonal, diagonal (+50%)
+ALIEN_BEHAVIORS = ("hunt", "guard")
 
 
 @dataclass(frozen=True)
@@ -70,11 +71,14 @@ class Battle:
     """Rules of the game. Knows nothing about Gymnasium or neural networks."""
 
     def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, seed=None,
-                 alien_hp=30, wall_segments=None):
+                 alien_hp=30, wall_segments=None, alien_behavior="hunt"):
         """size: map width and height in tiles, including the outer wall (minimum 5).
         alien_hp: every alien's health (30 is a Sectoid soldier; 1 means any hit kills).
         wall_segments: number of interior wall pieces; None picks a number that scales with the
             map area (6 on the default 12 x 12 map, none on maps of 6 x 6 or smaller); 0 = open map.
+        alien_behavior: "hunt" (default) - aliens walk toward where a soldier was last seen, shooting what
+            they can see; "guard" - aliens hold their starting position and only shoot soldiers that come
+            into view (like aliens defending a landed UFO), so waiting for them never ends a battle.
         """
         if size < 5:
             raise ValueError("size must be at least 5 (a 3 x 3 interior)")
@@ -82,6 +86,9 @@ class Battle:
             raise ValueError("not enough floor tiles for that many units")
         if alien_hp < 1:
             raise ValueError("alien_hp must be at least 1")
+        if alien_behavior not in ALIEN_BEHAVIORS:
+            raise ValueError(f"alien_behavior must be one of {ALIEN_BEHAVIORS}, not {alien_behavior!r}")
+        self.alien_behavior = alien_behavior
         self.size, self.n_soldiers, self.n_aliens, self.max_turns = size, n_soldiers, n_aliens, max_turns
         self.alien_hp = alien_hp
         self.wall_segments = int(0.06 * (size - 2) ** 2) if wall_segments is None else wall_segments
@@ -257,6 +264,8 @@ class Battle:
                 if targets:
                     self.shoot(a, min(targets, key=lambda s: abs(s.y - a.y) + abs(s.x - a.x)), "snap")
                     continue
+                if self.alien_behavior == "guard":      # guards never leave their post
+                    break
                 steps = [d for d in range(8) if self.can_step(a, d)]
                 if not steps or a.tu <= budget:
                     break
@@ -316,13 +325,13 @@ class XcomEnv(gym.Env):
     metadata = {"render_modes": ["ansi"]}
 
     def __init__(self, size=12, n_soldiers=2, n_aliens=2, max_turns=30, reward_fn=None, render_mode=None,
-                 alien_hp=30, wall_segments=None):
-        """See Battle for size, alien_hp and wall_segments.
+                 alien_hp=30, wall_segments=None, alien_behavior="hunt"):
+        """See Battle for size, alien_hp, wall_segments and alien_behavior.
         Sizes the agent sees: observation 5 * size * size + len(UNIT_FEATURES) numbers when flattened
         (730 on the default 12 x 12 map); 8 + 2 * n_aliens + 1 actions.
         """
         self.cfg = dict(size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns,
-                        alien_hp=alien_hp, wall_segments=wall_segments)
+                        alien_hp=alien_hp, wall_segments=wall_segments, alien_behavior=alien_behavior)
         self.A, self.render_mode = n_aliens, render_mode
         self.reward_fn = reward_fn or sparse_reward
         self.action_space = spaces.Discrete(8 + 2 * n_aliens + 1)

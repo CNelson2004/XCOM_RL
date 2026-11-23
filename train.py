@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import gymnasium as gym
 from gymnasium.vector import AutoresetMode
 from itertools import chain
@@ -9,7 +9,7 @@ import numpy as np
 from agents.buffer import calculate_return_cartpole, calculate_return_xcom, RLDataset
 from agents.networks import PolicyNetwork_Cartpole, PolicyNetwork_Xcom, ValueNetwork_Cartpole, ValueNetwork_Xcom
 from agents.ppo import get_action_ppo_cartpole, learn_ppo_cartpole, get_action_ppo_xcom, learn_ppo_xcom
-from agents.checkpoints import save_checkpoint, load_checkpoint
+from agents.checkpoints import save_checkpoint
 
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode
 from gymnasium.wrappers import FlattenObservation
@@ -18,10 +18,10 @@ from env.xcom_sim import XcomEnv
 
 device = torch.device("cpu")
 
-def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, alien_behavior="hunt", entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
   lr = 3e-4
-  gamma = 0.99
+  gamma = 0.995
   batch_size = 256
   epsilon = 0.2
   policy_epochs = 5
@@ -43,17 +43,17 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size
   # making the parallel XCOM environments
   num_envs = 6
   envs = AsyncVectorEnv(
-      [lambda: FlattenObservation(XcomEnv(reward_fn=reward_fn,size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
+      [lambda: FlattenObservation(XcomEnv(reward_fn=reward_fn,alien_behavior=alien_behavior,size=size, n_soldiers=n_soldiers, n_aliens=n_aliens, max_turns=max_turns, alien_hp=alien_hp, wall_segments=wall_segments)) for _ in range(num_envs)],
       autoreset_mode=AutoresetMode.SAME_STEP,
   )
 
   # setting config to be used for checkpoint
-  env_kwargs = {"reward_fn" : reward_fn.__name__, "size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens,
+  env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens, "alien_behavior" : alien_behavior,
               "alien_hp": alien_hp, "wall_segments": wall_segments, "max_turns" : max_turns}
   config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
             "norm_epsilon" : norm_epsilon, "max_grad_norm" : max_grad_norm, "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, # more hyperparameters
             "obs_size": obs_size, "action_size": action_size, # calculated vars
-            "num_envs": num_envs, "env_kwargs" : env_kwargs} # environment vars
+            "num_envs": num_envs, "env_kwargs" : env_kwargs, "reward_fn" : reward_fn.__name__} # environment vars
 
   # getting initial observations
   obs, _ = envs.reset(seed=0)       
@@ -68,7 +68,7 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size
   # Start main loop
   results_ppo = []
   loop = tqdm(total=epochs, position=0, leave=False)
-  history = {"win rate": [], "loss rate": [], "timeout rate": [], "lr" : [], "avg entropy": [], "avg grad norm": [], "max grad norm": [], "value_loss" : [], "policy_loss" : [], "kl" : [], "illegals" : []} # illegals should always be 0
+  history = {"win rate": [], "loss rate": [], "timeout rate": [], "lr" : [], "avg entropy": [], "avg grad norm": [], "max grad norm": [], "avg policy norm" : [], "avg value norm" : [], "value_loss" : [], "policy_loss" : [], "kl" : [], "illegals" : []} # illegals should always be 0
   # Note: there is no inner episode loop because we are runnign multiple environments which can end at different times
   for epoch in range(epochs):
     # Reset environment before the epoch loop
@@ -155,7 +155,7 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size
     # Train
     dataset = RLDataset(memory) 
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True,drop_last=True) # dropping lat to not have weird edge case where std later is nan while normalizing.
-    entropy, norm, max_norm, value_loss, policy_loss, kl = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
+    entropy, norm, max_norm, policy_norm, value_norm, value_loss, policy_loss, kl = learn_ppo_xcom(optim, policy_network, value_network, loader, epsilon, policy_epochs, norm_epsilon, max_grad_norm,entropy_coef)
 
     #computing rates for this epoch
     win_rate = the_results["win"]/episodes
@@ -168,6 +168,8 @@ def ppo_main_xcom(epochs=3,save_rate=100, reward_fn=None, entropy_coef=0.01,size
     history["avg entropy"].append(float(np.round(entropy,4)))
     history["avg grad norm"].append(float(np.round(norm,4)))
     history["max grad norm"].append(float(np.round(max_norm,4)))
+    history["avg policy norm"].append(float(np.round(policy_norm,4)))
+    history["avg value norm"].append(float(np.round(value_norm,4)))
     history["value_loss"].append(float(np.round(value_loss,4)))
     history["policy_loss"].append(float(np.round(policy_loss,4)))
     history["kl"].append(float(np.round(kl,4)))

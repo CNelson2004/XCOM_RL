@@ -176,10 +176,7 @@ def get_best_policy(name=None,n_battles=300):
         checkpoints.append((path,checkpoint))
         agents.append(learning_agent(checkpoint))
     # I can just get one since all the epochs work off of the same env_kwargs
-    env_kwargs = checkpoint["config"]["env_kwargs"]
-    # the reward isn't needed to play battles, thus we drop it, because it causes errors
-    env_kwargs.pop("reward_fn", None)    
-
+    env_kwargs = checkpoint["config"]["env_kwargs"]  
 
     # getting evaluation results for each
     results = []
@@ -200,8 +197,6 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     check_path, checkpoint = get_best_policy(name,n_battles=n_battles//2)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
-    # the reward isn't needed to play battles, thus we drop it, because it causes errors
-    env_kwargs.pop("reward_fn", None)  
 
     # setting up all agents and their related vars
     aggressive, cautious = scripted_agent()
@@ -222,11 +217,12 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     reference_lines = {agent_name: r["win_rate"] for agent_name, r in results.items() if agent_name != "learner"}
     reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
 
-    check_path = f"runs/checkpoint_xcom_{name}.pt" if name else f"runs/checkpoint_xcom_final.pt"
+    check_path = f"runs/checkpoint_xcom_{name}.pt" if name else f"runs/checkpoint_xcom_epoch50.pt"
     pic_path = f"runs/training_curves_{name}.png" if name else f"runs/training_curves_final.png"
     plot_history(check_path, pic_path, baselines=reference_lines)
     # returning them (in case I want to keep them)
     return results
 
+
 if __name__ == "__main__":
-    evaluate_learner()
+    evaluate_learner(n_battles=200)

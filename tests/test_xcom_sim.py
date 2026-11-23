@@ -299,3 +299,29 @@ def test_units_with_identical_stats_keep_their_own_names():
     a.y, a.x, c.y, c.x = 5, 5, 5, 5
     a.tu = c.tu = 0                                  # every field now equal
     assert b.name(a) == "alien a" and b.name(c) == "alien b"
+
+
+def test_guard_aliens_never_move_but_still_shoot():
+    env = XcomEnv(alien_behavior="guard")
+    shots = 0
+    for seed in range(20):
+        obs, info = env.reset(seed=seed)
+        start = [(a.y, a.x) for a in env.battle.units[2:]]
+        rng, done = np.random.default_rng(seed), False
+        while not done:
+            obs, _, t, tr, info = env.step(int(rng.choice(np.flatnonzero(info["action_mask"]))))
+            done = t or tr
+            shots += sum(e["type"] == "shot" and e["shooter"] == ALIEN for e in info["events"])
+            assert [(a.y, a.x) for a in env.battle.units[2:]] == start
+    assert shots > 0                                  # guards do fire at soldiers they can see
+
+
+def test_alien_behavior_default_is_hunt_and_bad_values_fail():
+    assert XcomEnv().battle is None and Battle(seed=0).alien_behavior == "hunt"
+    try:
+        Battle(seed=0, alien_behavior="patrol")
+    except ValueError as err:
+        assert "alien_behavior" in str(err)
+    else:
+        raise AssertionError("an unknown alien_behavior should be refused")
+    

@@ -14,7 +14,7 @@ def tu_reward(events, result):
     elif result == "loss":
         rewards += -1.0
     elif result == "timeout":
-        rewards += 0.0
+        rewards += -0.5
 
     # rewards for TU saved
     # Note: event is a dictionary, events is a list
@@ -38,7 +38,7 @@ def tu_and_damage_reward(events, result):
     elif result == "loss":
         rewards += -1.0
     elif result == "timeout":
-        rewards += 0.0
+        rewards += -0.5
 
     for event in events:
         # rewards for damage
@@ -67,3 +67,32 @@ def tu_and_damage_reward(events, result):
 
     # Note: could think about giving very small reward for hp remaining on a soldier
     # (Would only do this if model becomes aggressive and TU reward isn't enough to handle it.)
+
+def damage_reward(events, result):
+
+    rewards = 0.0
+    # rewards for winning or not
+    if result == "win":
+        rewards += 1.0
+    elif result == "loss":
+        rewards += -1.0
+    elif result == "timeout":
+        rewards += -1.0
+
+    for event in events:
+        # rewards for damage
+        if event["type"] == "shot" and event["hit"]:
+            # rewards for damage dealt to aliens
+            frac_health = event["hp_lost"]/event["target_max_hp"]
+            if event["shooter"] == 0: # shooter is soldier
+                # we don't have to check damage because we know we hit
+                rewards += frac_health * 0.1
+                if event["killed"]:
+                    rewards += 0.1
+            # penalty for damage taken
+            else: # shooter == 1 (alien)
+                rewards += frac_health * -0.1
+                if event["killed"]:
+                    rewards += -0.1
+
+    return rewards

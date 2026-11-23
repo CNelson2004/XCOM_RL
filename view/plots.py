@@ -10,8 +10,8 @@
 Panels (all share the epoch axis, so you can read down a column to line events up):
     battle outcomes | average entropy
     value loss      | policy loss
-    approximate KL  | gradient norm
-    learning rate   | illegal actions
+    approximate KL  | gradient norm (both networks together)
+    value net norm  | policy net norm (each clipped separately)
 A panel whose numbers are not in the history (e.g. an older run) says so instead of failing.
 """
 import matplotlib
@@ -30,7 +30,7 @@ KEYS = {
     "win": "win rate", "loss": "loss rate", "timeout": "timeout rate",
     "entropy": "avg entropy", "value_loss": "value_loss", "policy_loss": "policy_loss",
     "kl": "kl", "grad_avg": "avg grad norm", "grad_max": "max grad norm",
-    "lr": "lr", "illegals": "illegals",
+    "value_norm": "avg value norm", "policy_norm": "avg policy norm",
 }
 
 
@@ -110,7 +110,7 @@ def plot_history(history, path="runs/training_curves.png", baselines=None, windo
     """history: the dict from ppo_main_xcom, or a path to a .pt checkpoint containing one.
     baselines: optional {"name": win rate} drawn as dashed reference lines on the outcomes panel.
     window: epochs in the win/loss/timeout moving average (each epoch's rates are noisy).
-    max_grad_norm: the clipping threshold, drawn on the gradient-norm panel.
+    max_grad_norm: the clipping threshold, drawn on the per-network gradient-norm panels.
     """
     if isinstance(history, str):
         import torch
@@ -121,7 +121,7 @@ def plot_history(history, path="runs/training_curves.png", baselines=None, windo
     x = np.arange(1, n + 1)
 
     fig, axes = plt.subplots(4, 2, figsize=(13, 15), facecolor=SURFACE, layout="constrained",
-                             gridspec_kw={"height_ratios": [1.5, 1, 1, 0.75]})
+                             gridspec_kw={"height_ratios": [1.5, 1, 1, 1]})
     fig.get_layout_engine().set(h_pad=0.12, w_pad=0.15, hspace=0.06, wspace=0.08)
     fig.suptitle(title or f"Training curves ({n} epochs, {window}-epoch moving average on outcomes)",
                  x=0.02, ha="left", fontsize=13, color=INK)
@@ -172,7 +172,8 @@ def plot_history(history, path="runs/training_curves.png", baselines=None, windo
 
     # Row 3, right: gradient norms, with the clipping threshold
     ax = axes[2, 1]
-    _style(ax, "Gradient norm before clipping")
+    separate = _series(history, "policy_norm", n) is not None      # newer runs clip each network on its own
+    _style(ax, "Gradient norm, both networks together" if separate else "Gradient norm before clipping")
     drawn = False
     for key, label, color in (("grad_avg", "average", BLUE), ("grad_max", "largest", ORANGE)):
         ys = _series(history, key, n)
@@ -181,27 +182,23 @@ def plot_history(history, path="runs/training_curves.png", baselines=None, windo
             _end_label(ax, x[-1], ys[-1], label, color)
             drawn = True
     if drawn:
-        _reference(ax, max_grad_norm, f"clip at {max_grad_norm}")
+        if not separate:                                            # one combined clip: draw its threshold
+            _reference(ax, max_grad_norm, f"clip at {max_grad_norm}")
         ax.set_ylim(bottom=0)
         ax.legend(loc="upper left", frameon=False, fontsize=9, labelcolor=INK_2)
     else:
         _missing(ax, "gradient norms", x)
 
-    # Row 4, left: learning rate (confirms the decay schedule)
-    ax = axes[3, 0]
-    ys = _line_panel(ax, history, x, "Learning rate", "lr", label_fmt="{:.1e}")
-    if ys is not None:
-        ax.set_ylim(bottom=0, top=float(np.nanmax(ys)) * 1.15)
-        ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
-        ax.yaxis.get_offset_text().set(color=MUTED, fontsize=8)
-
-    # Row 4, right: illegal actions (sanity check: should be a flat line at 0)
-    ax = axes[3, 1]
-    ys = _line_panel(ax, history, x, "Illegal actions (should be 0)", "illegals", label_fmt="{:.0f}",
-                     what="illegal actions")
-    if ys is not None:
-        ax.set_ylim(bottom=0, top=max(1, float(np.nanmax(ys)) * 1.2))
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    # Row 4: each network's own gradient norm before its clip (left: value, right: policy,
+    # matching the value loss | policy loss row above)
+    for col, key, label, color in ((0, "value_norm", "Value network gradient norm", ORANGE),
+                                   (1, "policy_norm", "Policy network gradient norm", BLUE)):
+        ax = axes[3, col]
+        ys = _line_panel(ax, history, x, f"{label} (average)", key, color=color, label_fmt="{:.2f}",
+                         what=f"{label.split(' gradient')[0].lower()} gradient norm")
+        if ys is not None:
+            _reference(ax, max_grad_norm, f"clip at {max_grad_norm}")
+            ax.set_ylim(0, max(max_grad_norm * 1.3, float(np.nanmax(ys)) * 1.15))
 
     fig.savefig(path, dpi=110, facecolor=SURFACE)
     plt.close(fig)                          # free the figure's memory

@@ -34,6 +34,8 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
   policy_losses = []
   KLs = []
   norms = []
+  policy_norms = []
+  value_norms = []
 
   epoch = 0
   while epoch < policy_epochs:
@@ -77,15 +79,19 @@ def learn_ppo_xcom(optim, policy, value, memory_dataloader, epsilon, policy_epoc
       #Updating
       optim.zero_grad()
       Loss.backward()
-      # clamping gradient
+      # clamping gradient (Must be done after zero_grad and .backward)
       # Note: logging gradient norm to see if clipping is doing its job
-      norm = torch.nn.utils.clip_grad_norm_(chain(policy.parameters(), value.parameters()),max_grad_norm)
-      norms.append(norm.item())
+      policy_norm = torch.nn.utils.clip_grad_norm_(policy.parameters(),max_grad_norm)
+      policy_norms.append(policy_norm.item())
+      value_norm = torch.nn.utils.clip_grad_norm_(value.parameters(),max_grad_norm)
+      value_norms.append(value_norm.item())
+      norm = float(np.sqrt(policy_norm.item()**2 + value_norm.item()**2))
+      norms.append(norm)
       # continuing with updating
       optim.step()
     epoch += 1
   # TODO: Add guard in case list is empty (no batch was processed. (This could be due to too few steps in a battle or something else))
-  return np.mean(entropies), np.mean(norms), np.max(norms), np.mean(value_losses), np.mean(policy_losses), np.mean(KLs)
+  return np.mean(entropies), np.mean(norms), np.max(norms), np.mean(policy_norms), np.mean(value_norms), np.mean(value_losses), np.mean(policy_losses), np.mean(KLs)
     
 
 def apply_mask_softmax(logits,masks):
