@@ -137,7 +137,6 @@ def describe_checkpoints(folder="runs", trusted=True):
         print(f"no .pt files in {folder}/")
     for p in paths:
         c = load_checkpoint(p, trusted)
-        print(c)
         cfg = _plain(c["config"])
         env = cfg.get("env_kwargs", {})
         saved = time.strftime("%b %d %H:%M", time.localtime(os.path.getmtime(p)))

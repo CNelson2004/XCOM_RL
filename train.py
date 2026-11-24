@@ -1,24 +1,24 @@
 import torch
 from torch.utils.data import DataLoader
-import gymnasium as gym
-from gymnasium.vector import AutoresetMode
 from itertools import chain
 from tqdm import tqdm
 import numpy as np
 
+from env.xcom_sim import XcomEnv, sparse_reward
+from agents.networks import PolicyNetwork_Cartpole, PolicyNetwork_Xcom, ValueNetwork_Cartpole, ValueNetwork_Xcom, PolicyNetwork_XcomCNN, ValueNetwork_XcomCNN
 from agents.buffer import calculate_return_cartpole, calculate_return_xcom, RLDataset
-from agents.networks import PolicyNetwork_Cartpole, PolicyNetwork_Xcom, ValueNetwork_Cartpole, ValueNetwork_Xcom
 from agents.ppo import get_action_ppo_cartpole, learn_ppo_cartpole, get_action_ppo_xcom, learn_ppo_xcom
 from agents.checkpoints import save_checkpoint
 
+import gymnasium as gym
+from gymnasium.vector import AutoresetMode
 from gymnasium.vector import AsyncVectorEnv, AutoresetMode
 from gymnasium.wrappers import FlattenObservation
 
-from env.xcom_sim import XcomEnv, sparse_reward
 
 device = torch.device("cpu")
 
-def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, alien_behavior="hunt", entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
+def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, network="mlp", alien_behavior="hunt", entropy_coef=0.01,size=12,n_soldiers=2,n_aliens=2,alien_hp=30,wall_segments=None):
   # Hyper parameters
   lr = 5e-4
   gamma = 0.995
@@ -26,11 +26,12 @@ def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, a
   epsilon = 0.2
   policy_epochs = 5
   hidden_size = 128
+  cnn_hidden_size = 32
   min_lr_frac = 0.1
 
   norm_epsilon = 1e-8
   max_policy_grad = 0.5
-  max_value_grad = 1.0
+  max_value_grad = 0.5
   entropy_coef = entropy_coef # Note: Higher entropy_coef allows more exploration (.01 vs .03. More stable vs more exploration)
   lambd = 0.95
 
@@ -38,7 +39,8 @@ def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, a
   max_turns=30
   num_envs = 6
 
-  obs_size = 5 * size * size + 10 #size of total state model can see (flattened obs: grid: (12 x 12)*5 + unit: 10)
+  layer_size = 5
+  obs_size = layer_size * size * size + 10 #size of total state model can see (flattened obs: grid: (12 x 12)*5 + unit: 10)
   action_size = 8 + 2 * n_aliens + 1 #number of actions that can be taken (8 types of movement, 2 shots for each alien, and passing turn)
 
   env_kwargs = {"size": size, "n_soldiers": n_soldiers, "n_aliens": n_aliens, "alien_behavior": alien_behavior,
@@ -53,17 +55,21 @@ def ppo_main_xcom(epochs=3,battles=100,save_rate=100, reward_fn=sparse_reward, a
 
   # setting config to be used for checkpoint
   config = {"hidden_size": hidden_size, "lr": lr, "gamma": gamma, "epsilon": epsilon, "batch_size" : batch_size, "policy_epochs": policy_epochs, "lambd" : lambd, # hyperparameters
-            "norm_epsilon" : norm_epsilon, "max_policy_grad" : max_policy_grad, "max_value_grad" : max_value_grad, "num_steps" : num_steps,
+            "norm_epsilon" : norm_epsilon, "max_policy_grad" : max_policy_grad, "max_value_grad" : max_value_grad, "network" : network,
             "entropy_coef" : entropy_coef, "battles" : battles, "num_steps" : num_steps, "total_epochs" : epochs, "min_lr_frac" : min_lr_frac, # more hyperparameters
             "obs_size": obs_size, "action_size": action_size, # calculated vars
-            "num_envs": num_envs, "env_kwargs" : env_kwargs, "reward_fn" : reward_fn.__name__} # environment vars
+            "num_envs": num_envs, "env_kwargs" : env_kwargs, "reward_fn" : reward_fn.__name__, "layer_size" : layer_size, "cnn_hidden_size" : cnn_hidden_size} # environment vars
 
   # getting initial observations
   obs, _ = envs.reset(seed=0)       
 
   # Init networks
-  policy_network = PolicyNetwork_Xcom(obs_size, action_size, hidden_size).cpu() #running on my laptop, so no cuda
-  value_network = ValueNetwork_Xcom(obs_size, hidden_size).cpu()
+  if network == "cnn":
+    policy_network = PolicyNetwork_XcomCNN(obs_size, action_size, layer_size, size, cnn_hidden_size, hidden_size).cpu() #running on my laptop, so no cuda
+    value_network = ValueNetwork_XcomCNN(obs_size, layer_size, size, cnn_hidden_size, hidden_size).cpu()
+  else: #network == "mlp"
+    policy_network = PolicyNetwork_Xcom(obs_size, action_size, hidden_size).cpu() #running on my laptop, so no cuda
+    value_network = ValueNetwork_Xcom(obs_size, hidden_size).cpu()
 
   # Init optimizer
   optim = torch.optim.Adam(chain(policy_network.parameters(), value_network.parameters()), lr=lr)

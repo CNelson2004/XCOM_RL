@@ -3,10 +3,11 @@ import glob, os, re
 from tqdm import tqdm
 from gymnasium.wrappers import FlattenObservation
 from env.xcom_sim import XcomEnv
-from agents.networks import PolicyNetwork_Xcom
+from agents.networks import PolicyNetwork_Xcom, PolicyNetwork_XcomCNN
 from agents.checkpoints import load_checkpoint
 from agents.ppo import get_action_ppo_xcom
 from view.plots import plot_history
+from agents.checkpoints import run_checkpoints
 
 # evaluate the policy given to it
 def evaluate(policy, n_battles=500, init_seed=1_000_000, flatten=True, desc=None, **env_kwargs):
@@ -141,7 +142,11 @@ def scripted_agent(fixed_position=True):
 
 def learning_agent(checkpoint):
     config = checkpoint["config"]
-    policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
+    network = config.get("network", "mlp") # get network, if undefined, then it is mlp
+    if network == "cnn":
+        policy_network = PolicyNetwork_XcomCNN(config["obs_size"], config["action_size"], config["layer_size"], config["env_kwargs"]["size"], config["cnn_hidden_size"], config["hidden_size"])
+    else: # network == "mlp"
+        policy_network = PolicyNetwork_Xcom(config["obs_size"], config["action_size"], config["hidden_size"])
     policy_network.load_state_dict(checkpoint["policy"])
     policy_network.eval() 
 
@@ -192,9 +197,13 @@ def get_best_policy(name=None,n_battles=300):
     # returning best checkpoint
     return (checkpoints[index][0], checkpoints[index][1])
     
-def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
+    
+def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000, eval_checkpoint=False):
     # getting environment variables
-    check_path, checkpoint = get_best_policy(name,n_battles=n_battles//2)
+    if eval_checkpoint:
+        check_path, checkpoint = run_checkpoints(name, trusted=True)[-1]
+    else:
+        check_path, checkpoint = get_best_policy(name,n_battles=n_battles//2)
     print(f"Checkpoint path for learner is: {check_path}")
     env_kwargs = checkpoint["config"]["env_kwargs"]
 
@@ -217,7 +226,7 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
     reference_lines = {agent_name: r["win_rate"] for agent_name, r in results.items() if agent_name != "learner"}
     reference_lines["learner (held-out)"] = results["learner"]["win_rate"]
 
-    check_path = f"runs/checkpoint_xcom_{name}.pt" if name else f"runs/checkpoint_xcom_epoch50.pt"
+    check_path = f"runs/checkpoint_xcom_{name}.pt" if name else f"runs/checkpoint_xcom_final.pt"
     pic_path = f"runs/training_curves_{name}.png" if name else f"runs/training_curves_final.png"
     plot_history(check_path, pic_path, baselines=reference_lines)
     # returning them (in case I want to keep them)
@@ -225,4 +234,4 @@ def evaluate_learner(name=None, n_battles=500, init_seed=1_000_000):
 
 
 if __name__ == "__main__":
-    evaluate_learner(n_battles=200)
+    evaluate_learner(eval_checkpoint=True)
